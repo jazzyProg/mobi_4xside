@@ -29,7 +29,7 @@ models/*.weights
 !models/.gitkeep
 
 # Данные
-data/
+quarantine/
 logs/
 *.log
 

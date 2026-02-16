@@ -1,9 +1,0 @@
-{
-  "holes_count_ok": false,
-  "diameters_ok": false,
-  "positions_ok": false,
-  "ok": false,
-  "details": [],
-  "extra_holes": 0,
-  "compare_error": "Недостающие отверстия в Vision: 89"
-}
