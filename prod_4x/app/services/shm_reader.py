@@ -18,7 +18,10 @@ class ShmSlotMetadata:
     pixel_format: int
     data_size: int
 
-    STRUCT_FORMAT = "=IddIIIII"
+    # Must stay byte-compatible with camera_4x.app.services.shm_manager.ShmSlotMetadata
+    # Layout: frame_id, timestamp, camera_timestamp, width, height,
+    # channels, pixel_format, data_size, reserved
+    STRUCT_FORMAT = "=IddIIIIII"
     STRUCT_SIZE = struct.calcsize(STRUCT_FORMAT)
 
 
@@ -104,12 +107,24 @@ class CameraSHMReader:
             metadata = {
                 'frame_id': unpacked[0],
                 'timestamp': unpacked[1],
+                'camera_timestamp': unpacked[2],
                 'width': unpacked[3],
                 'height': unpacked[4],
                 'channels': unpacked[5],
                 'pixel_format': unpacked[6],
                 'data_size': unpacked[7]
             }
+
+            if metadata['data_size'] <= 0:
+                return b"", metadata
+            if metadata['data_size'] > self.slot_size:
+                logger.warning(
+                    "Slot %s has invalid data_size=%s (slot_size=%s)",
+                    slot_idx,
+                    metadata['data_size'],
+                    self.slot_size,
+                )
+                return None, metadata
 
             # Читаем данные кадра
             data_offset = slot_offset + self.metadata_size

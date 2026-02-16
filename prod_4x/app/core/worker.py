@@ -173,11 +173,21 @@ def qc_loop(settings: Settings | None = None) -> None:
 
             # 2) Read bytes from SHM
             reader = _ensure_shm_reader(settings, shm_name)
-            frame_data, _slot_md = reader.read_slot(int(shm_slot))
+            frame_data = None
+            for attempt in range(3):
+                frame_data, _slot_md = reader.read_slot(int(shm_slot))
+                if frame_data:
+                    break
+                if attempt < 2:
+                    log.debug(
+                        "Frame %s: SHM slot %s returned empty payload on attempt %s, retrying",
+                        fid, shm_slot, attempt + 1,
+                    )
+                    time.sleep(0.03)
 
             if not frame_data:
                 log.warning(
-                    "Skipping frame %s: SHM slot %s returned empty data, deleting frame",
+                    "Skipping frame %s: SHM slot %s returned empty data after retries, deleting frame",
                     fid, shm_slot
                 )
                 # УДАЛЯЕМ фрейм чтобы не зацикливаться
