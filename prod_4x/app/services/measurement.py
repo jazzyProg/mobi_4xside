@@ -112,28 +112,6 @@ def _hole_far_outside_board(*, dist_left: float, dist_right: float, dist_bot: fl
         or dist_top < outside_threshold
     )
 
-
-
-def _hole_geom_from_poly(pts_px: np.ndarray):
-    """Return robust hole geometry even for short/partial contours.
-
-    For regular contours (>=5 points) use ellipse fit.
-    For short contours (3-4 points), fallback to minEnclosingCircle so detections
-    are not dropped just because polygon has too few vertices.
-    """
-    if len(pts_px) >= 5:
-        center_px, axes_px, ang = _ellipse_props_px(pts_px)
-        return center_px, axes_px, ang, False
-
-    if len(pts_px) >= 3:
-        (cx, cy), r = cv2.minEnclosingCircle(pts_px.astype(np.float32))
-        d = 2.0 * float(r)
-        center_px = np.array([cx, cy], dtype=np.float32)
-        axes_px = (d, d)
-        return center_px, axes_px, 0.0, True
-
-    return None
-
 def _ellipse_props_px(pts_px: np.ndarray):
     (cx, cy), (maj, minr), ang = cv2.fitEllipse(pts_px)
     return np.array([cx, cy], np.float32), (float(maj), float(minr)), float(ang)
