@@ -38,7 +38,7 @@ GRID = 0.5  # Шаг сетки CAD
 NEAR_STEP_MM = 0.10
 
 # ───── новые пороги валидации (мм) ─────
-# Если отверстие "вне" прямоугольника сильнее, чем на MARGIN_MM → отбрасываем как артефакт.
+# Если отверстие "вне" прямоугольника сильнее, чем на MARGIN_MM (+ его радиус) → отбрасываем.
 OUTSIDE_MARGIN_MM = 1.0
 # Если отверстие совсем близко к краю (< EDGE_WARN_MM) — можно логировать, но не отбрасывать.
 EDGE_WARN_MM = 0.2
@@ -95,6 +95,21 @@ def _mid_text(img, p1, p2, text):
         COLOR_RECT,
         1,
         cv2.LINE_AA,
+    )
+
+
+def _hole_far_outside_board(*, dist_left: float, dist_right: float, dist_bot: float, dist_top: float, radius_mm: float) -> bool:
+    """Return True when the hole is confidently outside board bounds.
+
+    We allow minor OBB fitting jitter for edge/corner holes. A hole is rejected
+    only if its center is farther than (radius + OUTSIDE_MARGIN_MM) from any side.
+    """
+    outside_threshold = -(OUTSIDE_MARGIN_MM + max(radius_mm, 0.0))
+    return (
+        dist_left < outside_threshold
+        or dist_right < outside_threshold
+        or dist_bot < outside_threshold
+        or dist_top < outside_threshold
     )
 
 def _ellipse_props_px(pts_px: np.ndarray):
@@ -349,17 +364,21 @@ def measure_board(
         dist_bot = local_y + geo["half_h"]
         dist_top = geo["half_h"] - local_y
 
-        # FIX: если точка реально вне прямоугольника — не считаем это отверстием детали
-        if (
-            dist_left < -OUTSIDE_MARGIN_MM
-            or dist_right < -OUTSIDE_MARGIN_MM
-            or dist_bot < -OUTSIDE_MARGIN_MM
-            or dist_top < -OUTSIDE_MARGIN_MM
+        # FIX: отверстие рядом с кромкой/в углу не должно отбрасываться из-за джиттера OBB.
+        # Отбрасываем только если центр отверстия ушёл далеко наружу даже с учётом радиуса.
+        radius_mm = dia / 2.0
+        if _hole_far_outside_board(
+            dist_left=dist_left,
+            dist_right=dist_right,
+            dist_bot=dist_bot,
+            dist_top=dist_top,
+            radius_mm=radius_mm,
         ):
             if verbose:
+                outside_threshold = -(OUTSIDE_MARGIN_MM + radius_mm)
                 print(
                     "[WARN] hole outside OBB:",
-                    f"L={dist_left:.3f} R={dist_right:.3f} B={dist_bot:.3f} T={dist_top:.3f}",
+                    f"L={dist_left:.3f} R={dist_right:.3f} B={dist_bot:.3f} T={dist_top:.3f} thr={outside_threshold:.3f}",
                 )
             continue
 
