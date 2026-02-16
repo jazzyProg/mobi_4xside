@@ -334,17 +334,20 @@ def measure_board(
     # ───────── отверстия ─────────
     candidates = []
     for pts in hole_polys:
-        if len(pts) < 5:
+        geom = _hole_geom_from_poly(pts)
+        if geom is None:
             continue
 
-        center_px, axes_px, ang = _ellipse_props_px(pts)
+        center_px, axes_px, ang, used_circle_fallback = geom
+        if verbose and used_circle_fallback:
+            print(f"[WARN] short hole contour fallback: points={len(pts)}")
         maj_mm = _diameter_mm(axes_px[0], ang)
         min_mm = _diameter_mm(axes_px[1], ang + 90)
         dia = (maj_mm + min_mm) / 2.0
 
         if not (DIAM_MIN <= max(maj_mm, min_mm) <= DIAM_MAX):
             continue
-        if max(maj_mm, min_mm) / min(maj_mm, min_mm) > MAX_AXIS_RATIO:
+        if (not used_circle_fallback) and (max(maj_mm, min_mm) / min(maj_mm, min_mm) > MAX_AXIS_RATIO):
             continue
 
         # if not _inside_poly(center_px, rect_poly): continue
