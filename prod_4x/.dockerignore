@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+
+# Virtual Environment - НЕ копируем!
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# Environment
+.env
+
+# Data - НЕ копируем!
+data/
+logs/
+models/*.pt
+tests/
+
+# Временные файлы
+*.tmp
+*.log
+*.bak
+
+# README и документация
+*.md

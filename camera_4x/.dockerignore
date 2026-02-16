@@ -1,0 +1,45 @@
+cat > .dockerignore << 'EOF'
+# Не копировать в образ Docker
+
+# Virtual environment
+venv/
+env/
+.venv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+
+# Logs
+logs/
+*.log
+
+# Data
+data/
+frames/
+
+# Documentation
+README.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Tests
+tests/
+*.test.py
+EOF

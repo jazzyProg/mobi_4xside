@@ -1,0 +1,162 @@
+# gateway/docker-compose.yml
+
+version: "3.8"
+
+services:
+    # ============================================
+    # QC Service (prod_4x) - host network
+    # ============================================
+    qc-service:
+        build:
+            context: ../prod_4x
+            dockerfile: Dockerfile
+        image: prod-4x:latest
+        container_name: qc-service
+        network_mode: host
+        restart: unless-stopped
+        shm_size: 256mb
+
+        environment:
+            - PRODUCTS_API_URL=http://localhost:8000
+            - SIGNALS_API_URL=http://localhost:8002
+            - CAMERA_API_URL=http://localhost:8003
+            - MODEL_PATH=/app/models/best.pt
+            - QUARANTINE_DIR=/app/data/quarantine
+            - CAD_DIR=/app/data/cad
+            - SHM_NAME=qc_camera_ringbuffer
+            - SHM_SLOT_SIZE=10485760
+            - SHM_NUM_SLOTS=16
+            - API_HOST=0.0.0.0
+            - API_PORT=8001
+            - LOG_LEVEL=INFO
+
+        volumes:
+            - /dev/shm:/dev/shm:rw
+            - ${MODELS_PATH}:/app/models:ro
+            - ${QUARANTINE_PATH}:/app/data/quarantine:rw
+            - ${CAD_FILES_PATH}:/app/data/cad:ro
+            - qc-logs:/app/logs:rw
+
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: 1
+                          capabilities: [gpu]
+
+    # ============================================
+    # Camera API (camera_4x) - host network
+    # ============================================
+    camera-api:
+        build:
+            context: ../camera_4x
+            dockerfile: Dockerfile
+        image: camera-4x:latest
+        container_name: camera-api
+        network_mode: host
+        restart: unless-stopped
+        shm_size: 512mb
+
+        cap_add:
+            - NET_RAW
+            - NET_ADMIN
+            - IPC_LOCK
+
+        environment:
+            - MVS_SDK_PATH=/opt/MVS
+            - CAMERA_IP=10.50.50.10
+            - NET_IP=10.50.50.1
+            - SHM_NAME=qc_camera_ringbuffer
+            - SHM_SLOT_SIZE=10485760
+            - SHM_SLOT_COUNT=16
+            - DISK_STORAGE_PATH=/data/photos
+            - MAX_DISK_STORAGE_GB=50
+            - ENABLE_AUTO_CLEANUP=true
+            - HOST=0.0.0.0
+            - PORT=8003
+            - LOG_LEVEL=INFO
+
+        volumes:
+            - /opt/MVS:/opt/MVS:ro
+            - /dev/shm:/dev/shm:rw
+            - ${CAMERA_STORAGE_PATH}:/data/photos:rw
+            - camera-logs:/app/logs:rw
+
+    # ============================================
+    # Signals API (lampa_4x) - host network
+    # ============================================
+    signals-api:
+        build:
+            context: ../lampa_4x
+            dockerfile: Dockerfile
+        image: lampa-4x:latest
+        container_name: signals-api
+        network_mode: host
+        restart: unless-stopped
+
+        environment:
+            - MODBUS_IP=10.50.50.11
+            - MODBUS_PORT=502
+            - MODBUS_SLAVE_ID=1
+            - BIT_SUCCESS=3
+            - BIT_FAIL=2
+            - BIT_ALARM=4
+            - BIT_HEARTBEAT=5
+            - HOST=0.0.0.0
+            - PORT=8002
+            - LOG_LEVEL=INFO
+
+        volumes:
+            - signals-logs:/app/logs:rw
+
+    # ============================================
+    # Products API (db_4x) - host network
+    # ============================================
+    db-api:
+        build:
+            context: ../db_4x
+            dockerfile: Dockerfile
+        image: db-4x:latest
+        container_name: products-api
+        network_mode: host
+        restart: unless-stopped
+
+        environment:
+            # Явно указываем переменные (ВАЖНО!)
+            - DB_HOST=127.0.0.1 # ← localhost или 127.0.0.1
+            - DB_PORT=5432
+            - DB_USER=jazzy
+            - DB_PASSWORD=db7804721db
+            - DB_NAME=db
+            - APP_HOST=0.0.0.0
+            - APP_PORT=8000
+            - BASE_FILES_PATH=/home/jazzy/BD
+            - SEARCH_LIMIT=40
+
+        volumes:
+            - /home/jazzy/BD:/home/jazzy/BD:ro
+            - products-logs:/app/logs:rw
+
+    # ============================================
+    # NGINX Gateway - host network (упрощенно)
+    # ============================================
+    nginx:
+        image: nginx:alpine
+        container_name: production-gateway
+        network_mode: host
+        volumes:
+            - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+        restart: unless-stopped
+        depends_on:
+            - qc-service
+            - camera-api
+            - signals-api
+            - db-api
+
+# Удаляем секцию networks - не нужна в host mode
+volumes:
+    qc-logs:
+    camera-logs:
+    signals-logs:
+    products-logs:

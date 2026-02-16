@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment - КРИТИЧНО!
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Environment variables
+.env
+*.env
+!.env.example
+
+# YOLO модели - НЕ коммитим (большие файлы)
+models/*.pt
+models/*.onnx
+models/*.weights
+!models/.gitkeep
+
+# Данные
+data/
+logs/
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# Docker (локальные билды)
+docker-compose.override.yml

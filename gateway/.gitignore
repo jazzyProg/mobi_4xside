@@ -1,0 +1,14 @@
+# gateway/.gitignore
+
+# Environment
+.env
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
