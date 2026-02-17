@@ -47,7 +47,13 @@ def create_app(
         yield
         # Graceful shutdown: cancel tasks + clear bits
         if settings.SHUTDOWN_CLEAR_BITS:
-            bits = [settings.BIT_SUCCESS, settings.BIT_FAIL, settings.BIT_ALARM, settings.BIT_HEARTBEAT]
+            bits = [
+                settings.BIT_SUCCESS,
+                settings.BIT_FAIL,
+                settings.BIT_ALARM,
+                settings.BIT_HEARTBEAT,
+                settings.BIT_CAMERA_TRIGGER,
+            ]
             try:
                 await app.state.controller.shutdown(bits)
             except Exception:

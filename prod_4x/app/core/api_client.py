@@ -32,6 +32,9 @@ class ExternalServicesClient:
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
         )
 
+    def _signals_enabled(self) -> bool:
+        return bool(self._settings.QUALITY_CHECK_ENABLED)
+
     # --------------------------------------------
     # Products API
     # --------------------------------------------
@@ -53,6 +56,10 @@ class ExternalServicesClient:
     # --------------------------------------------
     def signal_success(self, duration: float = 3.0) -> None:
         """POST /signal/success."""
+        if not self._signals_enabled():
+            logger.info("QUALITY_CHECK_ENABLED=false, skip SUCCESS signal")
+            return
+
         try:
             logger.info("Sending SUCCESS signal (duration=%ss)", duration)
             resp = self._client.post(
@@ -66,6 +73,10 @@ class ExternalServicesClient:
 
     def signal_fail(self) -> None:
         """POST /signal/fail."""
+        if not self._signals_enabled():
+            logger.info("QUALITY_CHECK_ENABLED=false, skip FAIL signal")
+            return
+
         try:
             logger.info("Sending FAIL signal")
             resp = self._client.post(
@@ -78,6 +89,10 @@ class ExternalServicesClient:
 
     def signal_alarm(self) -> None:
         """POST /signal/alarm."""
+        if not self._signals_enabled():
+            logger.info("QUALITY_CHECK_ENABLED=false, skip ALARM signal")
+            return
+
         try:
             logger.info("Sending ALARM signal")
             resp = self._client.post(
@@ -90,6 +105,10 @@ class ExternalServicesClient:
 
     def signal_heartbeat(self, duration: float = 1.0) -> None:
         """POST /signal/heartbeat."""
+        if not self._signals_enabled():
+            logger.debug("QUALITY_CHECK_ENABLED=false, skip HEARTBEAT signal")
+            return
+
         try:
             resp = self._client.post(
                 f"{self.signals_url}/signal/heartbeat",
@@ -99,6 +118,25 @@ class ExternalServicesClient:
             resp.raise_for_status()
         except httpx.HTTPError as e:
             logger.debug("Heartbeat failed: %s", e)
+
+    def signal_camera_trigger(self, duration: float | None = None) -> None:
+        """POST /signal/camera-trigger."""
+        if not self._signals_enabled():
+            logger.info("QUALITY_CHECK_ENABLED=false, skip CAMERA_TRIGGER signal")
+            return
+
+        pulse_duration = duration if duration is not None else self._settings.CAMERA_TRIGGER_PULSE_SEC
+
+        try:
+            logger.info("Sending CAMERA_TRIGGER signal (duration=%ss)", pulse_duration)
+            resp = self._client.post(
+                f"{self.signals_url}/signal/camera-trigger",
+                params={"duration": pulse_duration},
+                timeout=self._settings.SIGNAL_TIMEOUT,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            logger.warning("Failed to send camera trigger signal: %s", e)
 
     # --------------------------------------------
     # Camera API

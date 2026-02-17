@@ -29,6 +29,8 @@ services:
             - API_HOST=0.0.0.0
             - API_PORT=8001
             - LOG_LEVEL=INFO
+            - QUALITY_CHECK_ENABLED=true
+            - CAMERA_TRIGGER_PULSE_SEC=1.0
 
         volumes:
             - /dev/shm:/dev/shm:rw
@@ -76,6 +78,9 @@ services:
             - HOST=0.0.0.0
             - PORT=8003
             - LOG_LEVEL=INFO
+            - SIGNALS_API_URL=http://localhost:8002
+            - QUALITY_CHECK_ENABLED=true
+            - CAMERA_TRIGGER_PULSE_SEC=1.0
 
         volumes:
             - /opt/MVS:/opt/MVS:ro
@@ -103,6 +108,8 @@ services:
             - BIT_FAIL=2
             - BIT_ALARM=4
             - BIT_HEARTBEAT=5
+            - BIT_CAMERA_TRIGGER=6
+            - CAMERA_TRIGGER_DURATION_SEC=1.0
             - HOST=0.0.0.0
             - PORT=8002
             - LOG_LEVEL=INFO

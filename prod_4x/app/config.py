@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     API_RETRY_ATTEMPTS: int = Field(default=3, ge=0, le=20)
     SIGNAL_TIMEOUT: float = Field(default=5.0, ge=0.1, le=60.0)
 
+    # ===== Signal behavior =====
+    QUALITY_CHECK_ENABLED: bool = Field(default=True)
+    CAMERA_TRIGGER_PULSE_SEC: float = Field(default=1.0, ge=0.1, le=60.0)
+
     # ===== Camera / SHM =====
     # Keep as explicit URL for FIFO endpoint to preserve old code paths.
     CAMERA_METADATA_URL: str = Field(default="http://localhost:8003/frames/oldest/meta")

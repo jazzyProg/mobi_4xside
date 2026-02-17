@@ -21,11 +21,18 @@ except ImportError:
     MvCamera = None
 
 class CameraWorker(threading.Thread):
-    def __init__(self, settings, on_frame: Callable[[CapturedFrame], None], on_error: Callable[[Exception], None]):
+    def __init__(
+        self,
+        settings,
+        on_frame: Callable[[CapturedFrame], None],
+        on_error: Callable[[Exception], None],
+        on_trigger: Optional[Callable[[], None]] = None,
+    ):
         super().__init__(daemon=True, name="CameraWorker")
         self.settings = settings
         self.on_frame = on_frame
         self.on_error = on_error
+        self.on_trigger = on_trigger
 
         self.stop_event = threading.Event()
         self.frame_id = 0
@@ -68,6 +75,8 @@ class CameraWorker(threading.Thread):
         """Mock режим для тестирования"""
         logger.info("Running in MOCK mode (no real camera)")
         while not self.stop_event.is_set():
+            if self.on_trigger:
+                self.on_trigger()
             frame = self._create_mock_frame()
             if frame:
                 self.on_frame(frame)
@@ -84,6 +93,9 @@ class CameraWorker(threading.Thread):
             data_len = info.nFrameLen
             width = info.nWidth
             height = info.nHeight
+
+            if self.on_trigger:
+                self.on_trigger()
 
             # Копируем данные из C-памяти
             raw_data = string_at(p_data, data_len)
