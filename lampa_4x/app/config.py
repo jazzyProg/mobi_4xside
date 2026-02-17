@@ -32,9 +32,11 @@ class Settings(BaseSettings):
     BIT_FAIL: int = Field(default=2, ge=0, le=15)
     BIT_ALARM: int = Field(default=4, ge=0, le=15)
     BIT_HEARTBEAT: int = Field(default=5, ge=0, le=15)
+    BIT_CAMERA_TRIGGER: int = Field(default=6, ge=0, le=15)
 
     # Pulse timing
     PULSE_DURATION_SEC: float = Field(default=3.0, ge=0.1, le=60.0)
+    CAMERA_TRIGGER_DURATION_SEC: float = Field(default=1.0, ge=0.1, le=60.0)
 
     # API
     HOST: str = Field(default="0.0.0.0")

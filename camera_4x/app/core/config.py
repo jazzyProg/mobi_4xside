@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     max_disk_storage_gb: int = Field(default=5, ge=1, le=10000)
     enable_auto_cleanup: bool = Field(default=True)
 
+    # Signals integration
+    signals_api_url: str = Field(default="http://localhost:8002")
+    quality_check_enabled: bool = Field(default=True)
+    camera_trigger_pulse_sec: float = Field(default=1.0, ge=0.1, le=60.0)
+    signal_timeout_sec: float = Field(default=0.2, ge=0.05, le=5.0)
+
     # SHM
     shm_name: str = Field(default="/qc_camera_ringbuffer")
     shm_slot_size: int = Field(default=20 * 1024 * 1024, ge=1024)  # 10MB

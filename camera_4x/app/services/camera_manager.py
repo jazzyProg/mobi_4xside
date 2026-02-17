@@ -3,9 +3,11 @@ import uuid
 import logging
 from datetime import datetime
 from typing import Optional, List
-from threading import Lock
+from threading import Lock, Thread
 from collections import deque
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from app.core.config import get_settings
 settings = get_settings()
@@ -99,7 +101,8 @@ class CameraManager:
                 self.worker_thread = CameraWorker(
                     settings=settings,
                     on_frame=self._on_frame_captured,
-                    on_error=self._on_worker_error
+                    on_error=self._on_worker_error,
+                    on_trigger=self._on_camera_trigger
                 )
                 self.worker_thread.start()
 
@@ -151,6 +154,30 @@ class CameraManager:
                 "message": "Capture stopped successfully",
                 "frames_captured": frames_captured
             }
+
+    def _emit_camera_trigger_signal(self) -> None:
+        if not settings.quality_check_enabled:
+            return
+
+        try:
+            url = f"{settings.signals_api_url.rstrip('/')}/signal/camera-trigger"
+            query = urlencode({"duration": settings.camera_trigger_pulse_sec})
+            req = Request(
+                url=f"{url}?{query}",
+                method="POST",
+                data=b"",
+            )
+            with urlopen(req, timeout=settings.signal_timeout_sec):
+                return
+        except Exception as e:
+            logger.debug("Camera trigger signal failed: %s", e)
+
+    def _on_camera_trigger(self) -> None:
+        # Non-blocking fire-and-forget to avoid slowing down frame acquisition loop.
+        if not settings.quality_check_enabled:
+            return
+
+        Thread(target=self._emit_camera_trigger_signal, daemon=True).start()
 
     def _on_frame_captured(self, frame: CapturedFrame):
         try:
