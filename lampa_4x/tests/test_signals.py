@@ -39,3 +39,13 @@ def test_success_signal_enqueues_pulse():
         r = c.post("/signal/success?duration=0.5")
         assert r.status_code == 202
         assert ctrl.calls == [(settings.BIT_SUCCESS, 0.5)]
+
+
+def test_camera_trigger_signal_enqueues_pulse_with_custom_duration():
+    ctrl = FakeController()
+    app = create_app(controller_factory=lambda: ctrl)
+    settings = get_settings()
+    with TestClient(app) as c:
+        r = c.post("/signal/camera-trigger?duration=0.7")
+        assert r.status_code == 202
+        assert ctrl.calls == [(settings.BIT_CAMERA_TRIGGER, 0.7)]

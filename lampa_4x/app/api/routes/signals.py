@@ -47,6 +47,23 @@ async def signal_alarm(
     return {"message": f"Alarm signal (DO{settings.BIT_ALARM + 1}) initiated."}
 
 
+@router.post("/signal/camera-trigger", status_code=status.HTTP_202_ACCEPTED)
+async def signal_camera_trigger(
+    duration: float | None = Query(default=None, ge=0.1, le=60.0, description="Длительность импульса в секундах"),
+    settings: Settings = Depends(get_settings),
+    controller: ModbusController = Depends(get_controller),
+):
+    await _require_modbus(controller)
+    pulse_duration = duration if duration is not None else settings.CAMERA_TRIGGER_DURATION_SEC
+    await controller.schedule_pulse(settings.BIT_CAMERA_TRIGGER, pulse_duration)
+    return {
+        "message": (
+            f"Camera trigger signal (DO{settings.BIT_CAMERA_TRIGGER + 1}) initiated "
+            f"with duration {pulse_duration}s."
+        )
+    }
+
+
 @router.post("/signal/heartbeat", status_code=status.HTTP_202_ACCEPTED)
 async def signal_heartbeat(
     duration: float = Query(default=1.0, ge=0.1, le=60.0, description="Длительность импульса в секундах"),
