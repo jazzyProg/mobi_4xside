@@ -39,6 +39,8 @@ class CameraWorker(threading.Thread):
         self.cam = None
         self.payload_size = 0
         self.session_id = ""
+        self._event_callback_c = None
+        self._event_callback_registered = False
 
     def run(self):
         try:
@@ -94,7 +96,8 @@ class CameraWorker(threading.Thread):
             width = info.nWidth
             height = info.nHeight
 
-            if self.on_trigger:
+            if not self._event_callback_registered and self.on_trigger:
+                # Fallback when camera event callbacks are unsupported by firmware/transport.
                 self.on_trigger()
 
             # Копируем данные из C-памяти
@@ -205,6 +208,8 @@ class CameraWorker(threading.Thread):
         self.cam.MV_CC_SetEnumValueByString("TriggerSource", "EncoderConverter")
         logger.info("LineStart trigger: EncoderConverter")
 
+        self._register_hardware_trigger_callback()
+
         # Payload size (ПРАВИЛЬНО)
         stParam = MVCC_INTVALUE()
         memset(byref(stParam), 0, sizeof(stParam))
@@ -214,6 +219,47 @@ class CameraWorker(threading.Thread):
             logger.info(f"Payload size: {self.payload_size} bytes ({self.payload_size/1024/1024:.1f} MB)")
         else:
             logger.warning(f"Failed to get payload size: 0x{ret:x}")
+
+    def _register_hardware_trigger_callback(self) -> None:
+        """Register SDK event callback to react at hardware trigger time (Line0)."""
+        if not SDK_AVAILABLE or self.cam is None:
+            return
+
+        event_cb_type = CFUNCTYPE(None, POINTER(MV_EVENT_OUT_INFO), c_void_p)
+
+        def _event_cb(p_event_info, _p_user):
+            try:
+                if not p_event_info:
+                    return
+
+                event_name_raw = bytes(p_event_info.contents.EventName)
+                event_name = event_name_raw.split(b"\x00", 1)[0].decode("ascii", errors="ignore")
+
+                # Fire on trigger-related events as close as possible to hardware edge.
+                interesting = ("Line0", "FrameBurstStart", "LineStart", "ExposureStart", "FrameStart")
+                if any(key in event_name for key in interesting):
+                    if self.on_trigger:
+                        self.on_trigger()
+            except Exception as e:
+                logger.debug("Camera event callback error: %s", e)
+
+        self._event_callback_c = event_cb_type(_event_cb)
+
+        ret = self.cam.MV_CC_RegisterAllEventCallBack(self._event_callback_c, None)
+        if ret != 0:
+            logger.warning("Failed to register all-event callback: 0x%s", format(ret, 'x'))
+            return
+
+        for event_name in ["Line0RisingEdge", "FrameBurstStart", "LineStart", "ExposureStart", "FrameStart"]:
+            evt_ret = self.cam.MV_CC_EventNotificationOn(event_name)
+            if evt_ret == 0:
+                logger.info("Event notification enabled: %s", event_name)
+            else:
+                logger.debug("Event notification unsupported for %s: 0x%s", event_name, format(evt_ret, 'x'))
+
+        self._event_callback_registered = True
+        logger.info("Hardware trigger event callback registered")
+
 
     def _start_capture(self):
         """Запуск захвата"""
