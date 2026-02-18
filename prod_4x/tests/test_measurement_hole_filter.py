@@ -5,6 +5,8 @@ from app.services.measurement import (
     _is_concentric_duplicate,
     _is_nested_hole,
     _is_oval_hole,
+    _contour_circularity,
+    _is_overlap_duplicate,
 )
 
 import numpy as np
@@ -70,4 +72,30 @@ def test_concentric_duplicate_rejects_large_diameter_gap():
         dia_a_mm=6.0,
         center_b_mm=np.array([10.1, 10.1]),
         dia_b_mm=15.0,
+    )
+
+
+
+def test_contour_circularity_penalizes_elongated_shape():
+    ang = np.linspace(0.0, 2.0 * np.pi, 72, endpoint=False)
+    circle = np.stack([50 + 20 * np.cos(ang), 50 + 20 * np.sin(ang)], axis=1).astype(np.float32).reshape(-1, 1, 2)
+    ellipse = np.stack([50 + 35 * np.cos(ang), 50 + 12 * np.sin(ang)], axis=1).astype(np.float32).reshape(-1, 1, 2)
+    assert _contour_circularity(circle) > _contour_circularity(ellipse)
+
+
+def test_overlap_duplicate_detected_for_mostly_overlapping_circles():
+    assert _is_overlap_duplicate(
+        center_a_mm=np.array([10.0, 10.0]),
+        dia_a_mm=20.0,
+        center_b_mm=np.array([12.0, 10.0]),
+        dia_b_mm=19.0,
+    )
+
+
+def test_overlap_duplicate_not_detected_for_separate_circles():
+    assert not _is_overlap_duplicate(
+        center_a_mm=np.array([10.0, 10.0]),
+        dia_a_mm=10.0,
+        center_b_mm=np.array([24.0, 10.0]),
+        dia_b_mm=10.0,
     )
