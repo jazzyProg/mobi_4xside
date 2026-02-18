@@ -31,15 +31,18 @@ import numpy as np
 
 # ───────── калибровка ─────────
 ALPHA_X, ALPHA_Y = 0.10930, 0.09820  # мм / px
-DIAM_MIN, DIAM_MAX = 3.0, 35.0
-MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.15"))
+DIAM_MIN, DIAM_MAX = 2.7, 46.0
+MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.20"))
+LARGE_HOLE_MAX_AXIS_RATIO = float(os.getenv("HOLE_LARGE_OVALITY_MAX_RATIO", "1.65"))
 MIN_CIRCULARITY = float(os.getenv("HOLE_MIN_CIRCULARITY", "0.60"))
 LARGE_HOLE_DIAM_MM = float(os.getenv("HOLE_LARGE_DIAM_MM", "25.0"))
 LARGE_HOLE_MIN_CIRCULARITY = float(os.getenv("HOLE_LARGE_MIN_CIRCULARITY", "0.35"))
 NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.20"))
 CONCENTRIC_CENTER_TOL_MM = float(os.getenv("HOLE_CONCENTRIC_CENTER_TOL_MM", "0.35"))
 CONCENTRIC_DIA_RATIO_MAX = float(os.getenv("HOLE_CONCENTRIC_DIA_RATIO_MAX", "1.45"))
-OVERLAP_DUP_RATIO_MIN = float(os.getenv("HOLE_OVERLAP_DUP_RATIO_MIN", "0.70"))
+OVERLAP_DUP_RATIO_MIN = float(os.getenv("HOLE_OVERLAP_DUP_RATIO_MIN", "0.60"))
+OVERLAP_DUP_CENTER_RATIO_MAX = float(os.getenv("HOLE_OVERLAP_DUP_CENTER_RATIO_MAX", "0.35"))
+OVERLAP_DUP_DIA_RATIO_MAX = float(os.getenv("HOLE_OVERLAP_DUP_DIA_RATIO_MAX", "2.20"))
 ALLOW_SHORT_HOLE_FALLBACK = os.getenv("HOLE_ALLOW_SHORT_CONTOUR_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
 TAU_MM, K_RANSAC, MIN_FRACTION = 0.25, 150, 0.15
 GRID = 0.5  # Шаг сетки CAD
@@ -160,6 +163,12 @@ def _is_oval_hole(maj_mm: float, min_mm: float, *, max_axis_ratio: float = MAX_A
     return (max(maj_mm, min_mm) / min_mm) > max_axis_ratio
 
 
+def _passes_axis_ratio_filter(*, major_mm: float, minor_mm: float, diameter_mm: float) -> bool:
+    """Adaptive ovality gate: large holes tolerate stronger perspective/segmentation distortion."""
+    ratio_limit = LARGE_HOLE_MAX_AXIS_RATIO if diameter_mm >= LARGE_HOLE_DIAM_MM else MAX_AXIS_RATIO
+    return not _is_oval_hole(major_mm, minor_mm, max_axis_ratio=ratio_limit)
+
+
 def _contour_circularity(pts_px: np.ndarray) -> float:
     """Return contour circularity in [0, 1] where 1 is a perfect circle."""
     area = float(cv2.contourArea(pts_px.astype(np.float32)))
@@ -222,9 +231,19 @@ def _circle_intersection_area(radius_a: float, radius_b: float, center_distance:
 
 
 def _is_overlap_duplicate(*, center_a_mm: np.ndarray, dia_a_mm: float, center_b_mm: np.ndarray, dia_b_mm: float,
-                          overlap_ratio_min: float = OVERLAP_DUP_RATIO_MIN) -> bool:
-    """Return True when circles overlap too much to be treated as separate holes."""
+                          overlap_ratio_min: float = OVERLAP_DUP_RATIO_MIN,
+                          center_ratio_max: float = OVERLAP_DUP_CENTER_RATIO_MAX,
+                          dia_ratio_max: float = OVERLAP_DUP_DIA_RATIO_MAX) -> bool:
+    """Return True when circles are near-coincident and heavily overlap (typical nested artifact)."""
     center_distance = float(math.hypot(*(center_a_mm - center_b_mm)))
+    d_small = max(min(float(dia_a_mm), float(dia_b_mm)), 1e-6)
+    d_large = max(float(dia_a_mm), float(dia_b_mm))
+
+    if (d_large / d_small) > max(dia_ratio_max, 1.0):
+        return False
+    if center_distance > d_small * max(center_ratio_max, 0.0):
+        return False
+
     ra = max(float(dia_a_mm), 0.0) / 2.0
     rb = max(float(dia_b_mm), 0.0) / 2.0
     intersection = _circle_intersection_area(ra, rb, center_distance)
@@ -481,12 +500,23 @@ def measure_board(
 
         if not (DIAM_MIN <= max(maj_mm, min_mm) <= DIAM_MAX):
             continue
-        if (not used_circle_fallback) and _is_oval_hole(maj_mm, min_mm):
+        if (not used_circle_fallback) and (not _passes_axis_ratio_filter(major_mm=maj_mm, minor_mm=min_mm, diameter_mm=dia)):
             if verbose:
                 ratio = max(maj_mm, min_mm) / min_mm if min_mm > 0 else float("inf")
+                lim = LARGE_HOLE_MAX_AXIS_RATIO if dia >= LARGE_HOLE_DIAM_MM else MAX_AXIS_RATIO
                 print(
                     "[WARN] oval hole ignored:",
-                    f"major={maj_mm:.3f} minor={min_mm:.3f} ratio={ratio:.3f} lim={MAX_AXIS_RATIO:.3f}",
+                    f"major={maj_mm:.3f} minor={min_mm:.3f} ratio={ratio:.3f} lim={lim:.3f} dia={dia:.3f}",
+                )
+            continue
+
+        circularity = _contour_circularity(pts)
+        if (not used_circle_fallback) and (not _passes_circularity_filter(circularity=circularity, diameter_mm=dia)):
+            if verbose:
+                lim = LARGE_HOLE_MIN_CIRCULARITY if dia >= LARGE_HOLE_DIAM_MM else MIN_CIRCULARITY
+                print(
+                    "[WARN] low-circularity hole ignored:",
+                    f"circ={circularity:.3f} lim={lim:.3f} dia={dia:.3f}",
                 )
             continue
 
