@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from app.services.measurement import _hole_far_outside_board, _is_nested_hole, _is_oval_hole
+from app.services.measurement import (
+    _hole_far_outside_board,
+    _is_concentric_duplicate,
+    _is_nested_hole,
+    _is_oval_hole,
+)
 
 import numpy as np
 
@@ -48,3 +53,21 @@ def test_not_nested_when_centers_are_far_apart():
 def test_oval_hole_is_ignored_by_default_ratio_threshold():
     assert _is_oval_hole(maj_mm=12.0, min_mm=8.0)
     assert not _is_oval_hole(maj_mm=10.0, min_mm=9.5)
+
+
+def test_concentric_duplicate_is_detected():
+    assert _is_concentric_duplicate(
+        center_a_mm=np.array([10.0, 10.0]),
+        dia_a_mm=10.0,
+        center_b_mm=np.array([10.2, 10.1]),
+        dia_b_mm=11.5,
+    )
+
+
+def test_concentric_duplicate_rejects_large_diameter_gap():
+    assert not _is_concentric_duplicate(
+        center_a_mm=np.array([10.0, 10.0]),
+        dia_a_mm=6.0,
+        center_b_mm=np.array([10.1, 10.1]),
+        dia_b_mm=15.0,
+    )

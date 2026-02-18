@@ -32,8 +32,11 @@ import numpy as np
 # ───────── калибровка ─────────
 ALPHA_X, ALPHA_Y = 0.10930, 0.09820  # мм / px
 DIAM_MIN, DIAM_MAX = 2.0, 40.0
-MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.20"))
+MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.15"))
 NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.20"))
+CONCENTRIC_CENTER_TOL_MM = float(os.getenv("HOLE_CONCENTRIC_CENTER_TOL_MM", "0.35"))
+CONCENTRIC_DIA_RATIO_MAX = float(os.getenv("HOLE_CONCENTRIC_DIA_RATIO_MAX", "1.45"))
+ALLOW_SHORT_HOLE_FALLBACK = os.getenv("HOLE_ALLOW_SHORT_CONTOUR_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
 TAU_MM, K_RANSAC, MIN_FRACTION = 0.25, 150, 0.15
 GRID = 0.5  # Шаг сетки CAD
 NEAR_STEP_MM = 0.10
@@ -116,17 +119,17 @@ def _hole_far_outside_board(*, dist_left: float, dist_right: float, dist_bot: fl
 
 
 def _hole_geom_from_poly(pts_px: np.ndarray):
-    """Return robust hole geometry even for short/partial contours.
+    """Return hole geometry from contour.
 
-    For regular contours (>=5 points) use ellipse fit.
-    For short contours (3-4 points), fallback to minEnclosingCircle so detections
-    are not dropped just because polygon has too few vertices.
+    By default, short contours (<5 points) are ignored because they frequently
+    produce false nested/oval holes. Legacy fallback to minEnclosingCircle can be
+    re-enabled with HOLE_ALLOW_SHORT_CONTOUR_FALLBACK=1.
     """
     if len(pts_px) >= 5:
         center_px, axes_px, ang = _ellipse_props_px(pts_px)
         return center_px, axes_px, ang, False
 
-    if len(pts_px) >= 3:
+    if len(pts_px) >= 3 and ALLOW_SHORT_HOLE_FALLBACK:
         (cx, cy), r = cv2.minEnclosingCircle(pts_px.astype(np.float32))
         d = 2.0 * float(r)
         center_px = np.array([cx, cy], dtype=np.float32)
@@ -160,6 +163,19 @@ def _is_nested_hole(*, inner_center_mm: np.ndarray, inner_dia_mm: float, outer_c
     inner_radius = max(float(inner_dia_mm), 0.0) / 2.0
     outer_radius = max(float(outer_dia_mm), 0.0) / 2.0
     return center_distance + inner_radius <= outer_radius + max(margin_mm, 0.0)
+
+
+def _is_concentric_duplicate(*, center_a_mm: np.ndarray, dia_a_mm: float, center_b_mm: np.ndarray, dia_b_mm: float,
+                             center_tol_mm: float = CONCENTRIC_CENTER_TOL_MM,
+                             max_dia_ratio: float = CONCENTRIC_DIA_RATIO_MAX) -> bool:
+    """Return True for near-concentric duplicate detections of the same hole."""
+    center_distance = float(math.hypot(*(center_a_mm - center_b_mm)))
+    if center_distance > max(center_tol_mm, 0.0):
+        return False
+
+    d_small = max(min(float(dia_a_mm), float(dia_b_mm)), 1e-6)
+    d_large = max(float(dia_a_mm), float(dia_b_mm))
+    return (d_large / d_small) <= max(max_dia_ratio, 1.0)
 
 # ───────── прямоугольник через OBB ─────────
 def _fit_rectangle(poly_px: np.ndarray, img):
@@ -391,6 +407,8 @@ def measure_board(
                 geom = None
 
         if geom is None:
+            if verbose and len(pts) >= 3 and not ALLOW_SHORT_HOLE_FALLBACK:
+                print(f"[WARN] short contour ignored: points={len(pts)} (set HOLE_ALLOW_SHORT_CONTOUR_FALLBACK=1 to restore old behavior)")
             continue
 
         center_px, axes_px, ang, used_circle_fallback = geom
@@ -484,22 +502,31 @@ def measure_board(
     accepted = []
 
     for h in candidates:
-        nested = any(
-            _is_nested_hole(
+        nested_or_dup = False
+        for a in accepted:
+            is_nested = _is_nested_hole(
                 inner_center_mm=h["center_mm"],
                 inner_dia_mm=h["diameter_mm"],
                 outer_center_mm=a["center_mm"],
                 outer_dia_mm=a["diameter_mm"],
             )
-            for a in accepted
-        )
+            is_dup = _is_concentric_duplicate(
+                center_a_mm=h["center_mm"],
+                dia_a_mm=h["diameter_mm"],
+                center_b_mm=a["center_mm"],
+                dia_b_mm=a["diameter_mm"],
+            )
+            if is_nested or is_dup:
+                nested_or_dup = True
+                if verbose:
+                    reason = "nested" if is_nested else "concentric-duplicate"
+                    print(
+                        f"[WARN] {reason} hole ignored:",
+                        f"dia={h['diameter_mm']:.3f} pos=({h['posX']:.3f}, {h['posY']:.3f})",
+                    )
+                break
 
-        if nested:
-            if verbose:
-                print(
-                    "[WARN] nested hole ignored:",
-                    f"dia={h['diameter_mm']:.3f} pos=({h['posX']:.3f}, {h['posY']:.3f})",
-                )
+        if nested_or_dup:
             continue
 
         accepted.append(h)
