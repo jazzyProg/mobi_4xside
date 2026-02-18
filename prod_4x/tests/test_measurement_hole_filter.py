@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from app.services.measurement import _hole_far_outside_board
+from app.services.measurement import (
+    _hole_far_outside_board,
+    _is_concentric_duplicate,
+    _is_nested_hole,
+    _is_oval_hole,
+)
+
+import numpy as np
 
 
 def test_corner_hole_is_not_rejected_when_overlap_covers_jitter():
@@ -22,4 +29,45 @@ def test_hole_is_rejected_when_center_too_far_outside_even_with_radius_margin():
         dist_bot=15.0,
         dist_top=10.0,
         radius_mm=4.0,
+    )
+
+
+def test_nested_hole_is_detected_and_can_be_collapsed_to_larger_one():
+    assert _is_nested_hole(
+        inner_center_mm=np.array([10.0, 10.0]),
+        inner_dia_mm=6.0,
+        outer_center_mm=np.array([10.2, 10.0]),
+        outer_dia_mm=12.0,
+    )
+
+
+def test_not_nested_when_centers_are_far_apart():
+    assert not _is_nested_hole(
+        inner_center_mm=np.array([10.0, 10.0]),
+        inner_dia_mm=6.0,
+        outer_center_mm=np.array([18.0, 10.0]),
+        outer_dia_mm=12.0,
+    )
+
+
+def test_oval_hole_is_ignored_by_default_ratio_threshold():
+    assert _is_oval_hole(maj_mm=12.0, min_mm=8.0)
+    assert not _is_oval_hole(maj_mm=10.0, min_mm=9.5)
+
+
+def test_concentric_duplicate_is_detected():
+    assert _is_concentric_duplicate(
+        center_a_mm=np.array([10.0, 10.0]),
+        dia_a_mm=10.0,
+        center_b_mm=np.array([10.2, 10.1]),
+        dia_b_mm=11.5,
+    )
+
+
+def test_concentric_duplicate_rejects_large_diameter_gap():
+    assert not _is_concentric_duplicate(
+        center_a_mm=np.array([10.0, 10.0]),
+        dia_a_mm=6.0,
+        center_b_mm=np.array([10.1, 10.1]),
+        dia_b_mm=15.0,
     )
