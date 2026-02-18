@@ -7,6 +7,7 @@ from app.services.measurement import (
     _is_oval_hole,
     _contour_circularity,
     _is_overlap_duplicate,
+    _passes_circularity_filter,
 )
 
 import numpy as np
@@ -99,3 +100,11 @@ def test_overlap_duplicate_not_detected_for_separate_circles():
         center_b_mm=np.array([24.0, 10.0]),
         dia_b_mm=10.0,
     )
+
+
+def test_large_hole_allows_lower_circularity():
+    assert _passes_circularity_filter(circularity=0.40, diameter_mm=30.0)
+
+
+def test_small_hole_keeps_stricter_circularity():
+    assert not _passes_circularity_filter(circularity=0.40, diameter_mm=10.0)

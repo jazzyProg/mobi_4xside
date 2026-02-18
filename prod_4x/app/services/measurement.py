@@ -31,9 +31,11 @@ import numpy as np
 
 # ───────── калибровка ─────────
 ALPHA_X, ALPHA_Y = 0.10930, 0.09820  # мм / px
-DIAM_MIN, DIAM_MAX = 2.0, 40.0
+DIAM_MIN, DIAM_MAX = 3.0, 35.0
 MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.15"))
-MIN_CIRCULARITY = float(os.getenv("HOLE_MIN_CIRCULARITY", "0.72"))
+MIN_CIRCULARITY = float(os.getenv("HOLE_MIN_CIRCULARITY", "0.60"))
+LARGE_HOLE_DIAM_MM = float(os.getenv("HOLE_LARGE_DIAM_MM", "25.0"))
+LARGE_HOLE_MIN_CIRCULARITY = float(os.getenv("HOLE_LARGE_MIN_CIRCULARITY", "0.35"))
 NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.20"))
 CONCENTRIC_CENTER_TOL_MM = float(os.getenv("HOLE_CONCENTRIC_CENTER_TOL_MM", "0.35"))
 CONCENTRIC_DIA_RATIO_MAX = float(os.getenv("HOLE_CONCENTRIC_DIA_RATIO_MAX", "1.45"))
@@ -166,6 +168,14 @@ def _contour_circularity(pts_px: np.ndarray) -> float:
         return 0.0
     return float((4.0 * math.pi * area) / (perimeter * perimeter))
 
+
+
+
+def _passes_circularity_filter(*, circularity: float, diameter_mm: float) -> bool:
+    """Adaptive circularity gate: large holes are allowed to be less circular."""
+    if diameter_mm >= LARGE_HOLE_DIAM_MM:
+        return circularity >= LARGE_HOLE_MIN_CIRCULARITY
+    return circularity >= MIN_CIRCULARITY
 
 def _is_nested_hole(*, inner_center_mm: np.ndarray, inner_dia_mm: float, outer_center_mm: np.ndarray, outer_dia_mm: float,
                     margin_mm: float = NESTED_HOLE_MARGIN_MM) -> bool:
@@ -481,11 +491,12 @@ def measure_board(
             continue
 
         circularity = _contour_circularity(pts)
-        if (not used_circle_fallback) and circularity < MIN_CIRCULARITY:
+        if (not used_circle_fallback) and (not _passes_circularity_filter(circularity=circularity, diameter_mm=dia)):
             if verbose:
+                lim = LARGE_HOLE_MIN_CIRCULARITY if dia >= LARGE_HOLE_DIAM_MM else MIN_CIRCULARITY
                 print(
                     "[WARN] low-circularity hole ignored:",
-                    f"circ={circularity:.3f} lim={MIN_CIRCULARITY:.3f}",
+                    f"circ={circularity:.3f} lim={lim:.3f} dia={dia:.3f}",
                 )
             continue
 
