@@ -520,6 +520,16 @@ def measure_board(
                 )
             continue
 
+        circularity = _contour_circularity(pts)
+        if (not used_circle_fallback) and (not _passes_circularity_filter(circularity=circularity, diameter_mm=dia)):
+            if verbose:
+                lim = LARGE_HOLE_MIN_CIRCULARITY if dia >= LARGE_HOLE_DIAM_MM else MIN_CIRCULARITY
+                print(
+                    "[WARN] low-circularity hole ignored:",
+                    f"circ={circularity:.3f} lim={lim:.3f} dia={dia:.3f}",
+                )
+            continue
+
         # if not _inside_poly(center_px, rect_poly): continue
         c_mm = np.array([center_px[0] * ALPHA_X, center_px[1] * ALPHA_Y], dtype=float)
         rel = c_mm - geo["center_mm"]
