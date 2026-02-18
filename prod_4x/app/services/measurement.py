@@ -587,10 +587,16 @@ def measure_board(
                 center_b_mm=a["center_mm"],
                 dia_b_mm=a["diameter_mm"],
             )
-            if is_nested or is_dup:
+            is_overlap_dup = _is_overlap_duplicate(
+                center_a_mm=h["center_mm"],
+                dia_a_mm=h["diameter_mm"],
+                center_b_mm=a["center_mm"],
+                dia_b_mm=a["diameter_mm"],
+            )
+            if is_nested or is_dup or is_overlap_dup:
                 nested_or_dup = True
                 if verbose:
-                    reason = "nested" if is_nested else "concentric-duplicate"
+                    reason = "nested" if is_nested else "concentric-duplicate" if is_dup else "high-overlap-duplicate"
                     print(
                         f"[WARN] {reason} hole ignored:",
                         f"dia={h['diameter_mm']:.3f} pos=({h['posX']:.3f}, {h['posY']:.3f})",
