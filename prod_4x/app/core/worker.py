@@ -26,8 +26,8 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class HeartbeatConfig:
-    interval_sec: float = 3600.0
-    duration_sec: float = 1.0
+    interval_sec: float = 5400.0
+    duration_sec: float = 3.0
 
 
 class PeriodicHeartbeat:
@@ -126,6 +126,14 @@ def qc_loop(settings: Settings | None = None) -> None:
     from app.core.accumulator import increment_counters, reset_alarm, reset_counters_on_pass
 
     shm_name = _resolve_camera_shm_name(settings, api_client)
+
+    # Initial heartbeat pulse at QC startup, then periodic pulses while loop is running.
+    try:
+        log.info("Sending startup heartbeat pulse (duration=3.0s)")
+        api_client.signal_heartbeat(duration=3.0)
+    except Exception as e:
+        log.warning("Failed to send startup heartbeat: %s", e)
+
     heartbeat = PeriodicHeartbeat(api_client, HeartbeatConfig())
     heartbeat.start()
 

@@ -32,7 +32,8 @@ import numpy as np
 # ───────── калибровка ─────────
 ALPHA_X, ALPHA_Y = 0.10930, 0.09820  # мм / px
 DIAM_MIN, DIAM_MAX = 2.0, 40.0
-MAX_AXIS_RATIO = 2.50
+MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.20"))
+NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.20"))
 TAU_MM, K_RANSAC, MIN_FRACTION = 0.25, 150, 0.15
 GRID = 0.5  # Шаг сетки CAD
 NEAR_STEP_MM = 0.10
@@ -143,6 +144,22 @@ def _diameter_mm(length_px: float, angle_deg: float) -> float:
     dx = 0.5 * length_px * math.cos(theta)
     dy = 0.5 * length_px * math.sin(theta)
     return 2.0 * math.hypot(dx * ALPHA_X, dy * ALPHA_Y)
+
+
+def _is_oval_hole(maj_mm: float, min_mm: float, *, max_axis_ratio: float = MAX_AXIS_RATIO) -> bool:
+    """Return True if fitted hole geometry is too oval to be considered a round hole."""
+    if min_mm <= 0:
+        return True
+    return (max(maj_mm, min_mm) / min_mm) > max_axis_ratio
+
+
+def _is_nested_hole(*, inner_center_mm: np.ndarray, inner_dia_mm: float, outer_center_mm: np.ndarray, outer_dia_mm: float,
+                    margin_mm: float = NESTED_HOLE_MARGIN_MM) -> bool:
+    """Return True if `inner` is geometrically contained by `outer` (with configurable tolerance)."""
+    center_distance = float(math.hypot(*(inner_center_mm - outer_center_mm)))
+    inner_radius = max(float(inner_dia_mm), 0.0) / 2.0
+    outer_radius = max(float(outer_dia_mm), 0.0) / 2.0
+    return center_distance + inner_radius <= outer_radius + max(margin_mm, 0.0)
 
 # ───────── прямоугольник через OBB ─────────
 def _fit_rectangle(poly_px: np.ndarray, img):
@@ -385,7 +402,13 @@ def measure_board(
 
         if not (DIAM_MIN <= max(maj_mm, min_mm) <= DIAM_MAX):
             continue
-        if (not used_circle_fallback) and (max(maj_mm, min_mm) / min(maj_mm, min_mm) > MAX_AXIS_RATIO):
+        if (not used_circle_fallback) and _is_oval_hole(maj_mm, min_mm):
+            if verbose:
+                ratio = max(maj_mm, min_mm) / min_mm if min_mm > 0 else float("inf")
+                print(
+                    "[WARN] oval hole ignored:",
+                    f"major={maj_mm:.3f} minor={min_mm:.3f} ratio={ratio:.3f} lim={MAX_AXIS_RATIO:.3f}",
+                )
             continue
 
         # if not _inside_poly(center_px, rect_poly): continue
@@ -455,26 +478,28 @@ def measure_board(
             )
         )
 
-    # фильтр вложенных (ваш, с исправленной логикой "полностью внутри")
+    # Фильтр вложенных отверстий: оставляем только наибольшее из пересекающихся вложенных.
+    # Сортировка по убыванию диаметра гарантирует приоритет большего отверстия.
     candidates.sort(key=lambda h: -h["diameter_mm"])
     accepted = []
 
     for h in candidates:
-        h_center = h["center_mm"]
-        h_radius = h["diameter_mm"] / 2.0
-
-        nested = False
-        for a in accepted:
-            a_center = a["center_mm"]
-            a_radius = a["diameter_mm"] / 2.0
-            dist = math.hypot(*(h_center - a_center))
-
-            # отверстие считается вложенным ТОЛЬКО если оно целиком внутри другого
-            if dist + h_radius <= a_radius:
-                nested = True
-                break
+        nested = any(
+            _is_nested_hole(
+                inner_center_mm=h["center_mm"],
+                inner_dia_mm=h["diameter_mm"],
+                outer_center_mm=a["center_mm"],
+                outer_dia_mm=a["diameter_mm"],
+            )
+            for a in accepted
+        )
 
         if nested:
+            if verbose:
+                print(
+                    "[WARN] nested hole ignored:",
+                    f"dia={h['diameter_mm']:.3f} pos=({h['posX']:.3f}, {h['posY']:.3f})",
+                )
             continue
 
         accepted.append(h)
