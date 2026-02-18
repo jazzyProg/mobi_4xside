@@ -33,9 +33,11 @@ import numpy as np
 ALPHA_X, ALPHA_Y = 0.10930, 0.09820  # мм / px
 DIAM_MIN, DIAM_MAX = 2.0, 40.0
 MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.15"))
+MIN_CIRCULARITY = float(os.getenv("HOLE_MIN_CIRCULARITY", "0.72"))
 NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.20"))
 CONCENTRIC_CENTER_TOL_MM = float(os.getenv("HOLE_CONCENTRIC_CENTER_TOL_MM", "0.35"))
 CONCENTRIC_DIA_RATIO_MAX = float(os.getenv("HOLE_CONCENTRIC_DIA_RATIO_MAX", "1.45"))
+OVERLAP_DUP_RATIO_MIN = float(os.getenv("HOLE_OVERLAP_DUP_RATIO_MIN", "0.70"))
 ALLOW_SHORT_HOLE_FALLBACK = os.getenv("HOLE_ALLOW_SHORT_CONTOUR_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
 TAU_MM, K_RANSAC, MIN_FRACTION = 0.25, 150, 0.15
 GRID = 0.5  # Шаг сетки CAD
@@ -156,6 +158,15 @@ def _is_oval_hole(maj_mm: float, min_mm: float, *, max_axis_ratio: float = MAX_A
     return (max(maj_mm, min_mm) / min_mm) > max_axis_ratio
 
 
+def _contour_circularity(pts_px: np.ndarray) -> float:
+    """Return contour circularity in [0, 1] where 1 is a perfect circle."""
+    area = float(cv2.contourArea(pts_px.astype(np.float32)))
+    perimeter = float(cv2.arcLength(pts_px.astype(np.float32), True))
+    if area <= 0.0 or perimeter <= 0.0:
+        return 0.0
+    return float((4.0 * math.pi * area) / (perimeter * perimeter))
+
+
 def _is_nested_hole(*, inner_center_mm: np.ndarray, inner_dia_mm: float, outer_center_mm: np.ndarray, outer_dia_mm: float,
                     margin_mm: float = NESTED_HOLE_MARGIN_MM) -> bool:
     """Return True if `inner` is geometrically contained by `outer` (with configurable tolerance)."""
@@ -176,6 +187,46 @@ def _is_concentric_duplicate(*, center_a_mm: np.ndarray, dia_a_mm: float, center
     d_small = max(min(float(dia_a_mm), float(dia_b_mm)), 1e-6)
     d_large = max(float(dia_a_mm), float(dia_b_mm))
     return (d_large / d_small) <= max(max_dia_ratio, 1.0)
+
+
+def _circle_intersection_area(radius_a: float, radius_b: float, center_distance: float) -> float:
+    """Return area of two-circle intersection."""
+    ra = max(radius_a, 0.0)
+    rb = max(radius_b, 0.0)
+    d = max(center_distance, 0.0)
+
+    if ra <= 0.0 or rb <= 0.0:
+        return 0.0
+    if d >= ra + rb:
+        return 0.0
+    if d <= abs(ra - rb):
+        return math.pi * min(ra, rb) ** 2
+
+    alpha = math.acos(np.clip((d * d + ra * ra - rb * rb) / (2.0 * d * ra), -1.0, 1.0))
+    beta = math.acos(np.clip((d * d + rb * rb - ra * ra) / (2.0 * d * rb), -1.0, 1.0))
+    return (
+        ra * ra * alpha
+        + rb * rb * beta
+        - 0.5 * math.sqrt(max(0.0, (-d + ra + rb) * (d + ra - rb) * (d - ra + rb) * (d + ra + rb)))
+    )
+
+
+def _is_overlap_duplicate(*, center_a_mm: np.ndarray, dia_a_mm: float, center_b_mm: np.ndarray, dia_b_mm: float,
+                          overlap_ratio_min: float = OVERLAP_DUP_RATIO_MIN) -> bool:
+    """Return True when circles overlap too much to be treated as separate holes."""
+    center_distance = float(math.hypot(*(center_a_mm - center_b_mm)))
+    ra = max(float(dia_a_mm), 0.0) / 2.0
+    rb = max(float(dia_b_mm), 0.0) / 2.0
+    intersection = _circle_intersection_area(ra, rb, center_distance)
+    if intersection <= 0.0:
+        return False
+
+    min_area = math.pi * (min(ra, rb) ** 2)
+    if min_area <= 0.0:
+        return False
+
+    overlap_ratio = intersection / min_area
+    return overlap_ratio >= max(min(overlap_ratio_min, 1.0), 0.0)
 
 # ───────── прямоугольник через OBB ─────────
 def _fit_rectangle(poly_px: np.ndarray, img):
@@ -429,6 +480,15 @@ def measure_board(
                 )
             continue
 
+        circularity = _contour_circularity(pts)
+        if (not used_circle_fallback) and circularity < MIN_CIRCULARITY:
+            if verbose:
+                print(
+                    "[WARN] low-circularity hole ignored:",
+                    f"circ={circularity:.3f} lim={MIN_CIRCULARITY:.3f}",
+                )
+            continue
+
         # if not _inside_poly(center_px, rect_poly): continue
         c_mm = np.array([center_px[0] * ALPHA_X, center_px[1] * ALPHA_Y], dtype=float)
         rel = c_mm - geo["center_mm"]
@@ -516,10 +576,16 @@ def measure_board(
                 center_b_mm=a["center_mm"],
                 dia_b_mm=a["diameter_mm"],
             )
-            if is_nested or is_dup:
+            is_overlap_dup = _is_overlap_duplicate(
+                center_a_mm=h["center_mm"],
+                dia_a_mm=h["diameter_mm"],
+                center_b_mm=a["center_mm"],
+                dia_b_mm=a["diameter_mm"],
+            )
+            if is_nested or is_dup or is_overlap_dup:
                 nested_or_dup = True
                 if verbose:
-                    reason = "nested" if is_nested else "concentric-duplicate"
+                    reason = "nested" if is_nested else "concentric-duplicate" if is_dup else "high-overlap-duplicate"
                     print(
                         f"[WARN] {reason} hole ignored:",
                         f"dia={h['diameter_mm']:.3f} pos=({h['posX']:.3f}, {h['posY']:.3f})",
