@@ -55,7 +55,10 @@ def test_not_nested_when_centers_are_far_apart():
 
 
 def test_oval_hole_is_ignored_by_default_ratio_threshold():
-    assert _is_oval_hole(maj_mm=12.0, min_mm=8.0)
+    # default threshold is intentionally relaxed to reduce false negatives
+    # from segmentation-induced ovality.
+    assert not _is_oval_hole(maj_mm=12.0, min_mm=8.0)
+    assert _is_oval_hole(maj_mm=12.0, min_mm=4.0)
     assert not _is_oval_hole(maj_mm=10.0, min_mm=9.5)
 
 
@@ -110,11 +113,11 @@ def test_overlap_duplicate_not_detected_for_separate_circles():
 
 
 def test_large_hole_allows_lower_circularity():
-    assert _passes_circularity_filter(circularity=0.40, diameter_mm=30.0)
+    assert _passes_circularity_filter(circularity=0.25, diameter_mm=30.0)
 
 
 def test_small_hole_keeps_stricter_circularity():
-    assert not _passes_circularity_filter(circularity=0.40, diameter_mm=10.0)
+    assert not _passes_circularity_filter(circularity=0.25, diameter_mm=10.0)
 
 
 def test_overlap_duplicate_requires_close_centers():

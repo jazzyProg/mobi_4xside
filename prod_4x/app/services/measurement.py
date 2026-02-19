@@ -35,11 +35,16 @@ from app.utils.geometry import ALPHA_X, ALPHA_Y, DIAM_MIN, DIAM_MAX, snap_to_gri
 logger = logging.getLogger(__name__)
 
 # ───────── калибровка ─────────
-MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.20"))
-LARGE_HOLE_MAX_AXIS_RATIO = float(os.getenv("HOLE_LARGE_OVALITY_MAX_RATIO", "1.65"))
-MIN_CIRCULARITY = float(os.getenv("HOLE_MIN_CIRCULARITY", "0.60"))
+# NOTE:
+# The defaults below intentionally stay close to the legacy measurement script.
+# In production we've seen valid YOLO hole masks become slightly elliptical after
+# perspective/segmentation artifacts. Too-strict gates cause "detected by model,
+# missing in final JSON" incidents.
+MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "2.50"))
+LARGE_HOLE_MAX_AXIS_RATIO = float(os.getenv("HOLE_LARGE_OVALITY_MAX_RATIO", "2.80"))
+MIN_CIRCULARITY = float(os.getenv("HOLE_MIN_CIRCULARITY", "0.35"))
 LARGE_HOLE_DIAM_MM = float(os.getenv("HOLE_LARGE_DIAM_MM", "25.0"))
-LARGE_HOLE_MIN_CIRCULARITY = float(os.getenv("HOLE_LARGE_MIN_CIRCULARITY", "0.35"))
+LARGE_HOLE_MIN_CIRCULARITY = float(os.getenv("HOLE_LARGE_MIN_CIRCULARITY", "0.20"))
 NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.20"))
 CONCENTRIC_CENTER_TOL_MM = float(os.getenv("HOLE_CONCENTRIC_CENTER_TOL_MM", "0.35"))
 CONCENTRIC_DIA_RATIO_MAX = float(os.getenv("HOLE_CONCENTRIC_DIA_RATIO_MAX", "1.45"))
