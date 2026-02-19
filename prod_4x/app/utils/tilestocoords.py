@@ -4,6 +4,8 @@ import os, glob
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
+from app.utils import filter as dedup
+
 TILE_BASE  = 512
 OVERLAY    = 160
 TILE_FULL  = TILE_BASE + 2 * OVERLAY  # 832
@@ -35,21 +37,24 @@ def read_label_file(path: os.PathLike) -> Iterable[Tuple[int, List[float]]]:
             yield int(parts[0]), list(map(float, parts[1:]))
 
 def denormalize(coords: List[float], x_off: int, y_off: int) -> List[float]:
-    """Переводит нормализованные координаты в глобальные пиксели."""
+    """Переводит нормализованные координаты в глобальные пиксели без клипа."""
     out: List[float] = []
     for i in range(0, len(coords), 2):
-        x = coords[i]     * TILE_FULL + x_off
+        x = coords[i] * TILE_FULL + x_off
         y = coords[i + 1] * TILE_FULL + y_off
-
-        # FIX: клип в границы исходного кадра (убираем паддинг-координаты)
-        if x < 0.0: x = 0.0
-        elif x > IMAGESIZE - 1: x = IMAGESIZE - 1.0
-
-        if y < 0.0: y = 0.0
-        elif y > IMAGESIZE - 1: y = IMAGESIZE - 1.0
-
         out.extend([x, y])
     return out
+
+
+def _filter_in_frame_pairs(transformed: List[float]) -> List[float]:
+    filtered: List[float] = []
+    max_coord = IMAGESIZE - 1.0
+    for i in range(0, len(transformed), 2):
+        x = transformed[i]
+        y = transformed[i + 1]
+        if 0.0 <= x <= max_coord and 0.0 <= y <= max_coord:
+            filtered.extend([x, y])
+    return filtered
 
 def collect_labels(folder: os.PathLike) -> List[str]:
     """
@@ -65,9 +70,15 @@ def collect_labels(folder: os.PathLike) -> List[str]:
         x_off, y_off = tile_offset(row, col)
         for cls_id, coords in read_label_file(p):
             transformed = denormalize(coords, x_off, y_off)
-            out_lines.append(
-                f"{cls_id} " + " ".join(map(str, transformed))
-            )
+            transformed = _filter_in_frame_pairs(transformed)
+            if len(transformed) < 6:
+                continue
+
+            line = f"{cls_id} " + " ".join(map(str, transformed))
+            line = dedup.remove_duplicate_points_in_line(line)
+            if not line:
+                continue
+            out_lines.append(line)
     return out_lines
 
 def save_labels(lines: Iterable[str], dst: os.PathLike) -> None:

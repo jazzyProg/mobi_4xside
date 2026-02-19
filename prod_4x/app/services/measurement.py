@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import logging
 import os
 import sys
 from pathlib import Path
@@ -29,9 +30,11 @@ from typing import Dict, List
 import cv2
 import numpy as np
 
+from app.utils.geometry import ALPHA_X, ALPHA_Y, DIAM_MIN, DIAM_MAX, snap_to_grid
+
+logger = logging.getLogger(__name__)
+
 # ───────── калибровка ─────────
-ALPHA_X, ALPHA_Y = 0.10930, 0.09820  # мм / px
-DIAM_MIN, DIAM_MAX = 2.7, 46.0
 MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.20"))
 LARGE_HOLE_MAX_AXIS_RATIO = float(os.getenv("HOLE_LARGE_OVALITY_MAX_RATIO", "1.65"))
 MIN_CIRCULARITY = float(os.getenv("HOLE_MIN_CIRCULARITY", "0.60"))
@@ -45,7 +48,6 @@ OVERLAP_DUP_CENTER_RATIO_MAX = float(os.getenv("HOLE_OVERLAP_DUP_CENTER_RATIO_MA
 OVERLAP_DUP_DIA_RATIO_MAX = float(os.getenv("HOLE_OVERLAP_DUP_DIA_RATIO_MAX", "2.20"))
 ALLOW_SHORT_HOLE_FALLBACK = os.getenv("HOLE_ALLOW_SHORT_CONTOUR_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
 TAU_MM, K_RANSAC, MIN_FRACTION = 0.25, 150, 0.15
-GRID = 0.5  # Шаг сетки CAD
 NEAR_STEP_MM = 0.10
 
 # ───── новые пороги валидации (мм) ─────
@@ -109,13 +111,14 @@ def _mid_text(img, p1, p2, text):
     )
 
 
-def _hole_far_outside_board(*, dist_left: float, dist_right: float, dist_bot: float, dist_top: float, radius_mm: float) -> bool:
+def _hole_far_outside_board(*, dist_left: float, dist_right: float, dist_bot: float, dist_top: float, radius_mm: float, diameter_mm: float | None = None) -> bool:
     """Return True when the hole is confidently outside board bounds.
 
     We allow minor OBB fitting jitter for edge/corner holes. A hole is rejected
     only if its center is farther than (radius + OUTSIDE_MARGIN_MM) from any side.
     """
-    outside_threshold = -(OUTSIDE_MARGIN_MM + max(radius_mm, 0.0))
+    adaptive_margin = max(OUTSIDE_MARGIN_MM, 0.05 * max(float(diameter_mm or 0.0), 0.0))
+    outside_threshold = -(adaptive_margin + max(radius_mm, 0.0))
     return (
         dist_left < outside_threshold
         or dist_right < outside_threshold
@@ -439,7 +442,7 @@ def _inside_poly(center_px, poly):
     )
 
 def _snap(v: float) -> float:
-    return round(v / GRID) * GRID
+    return snap_to_grid(v)
 
 # ───────── основной поток ─────────
 def measure_board(
@@ -468,23 +471,8 @@ def measure_board(
 
     # ───────── отверстия ─────────
     candidates = []
-    hole_geom_fn = globals().get("_hole_geom_from_poly")
     for pts in hole_polys:
-        if callable(hole_geom_fn):
-            geom = hole_geom_fn(pts)
-        else:
-            # merge-safe fallback: even if helper was dropped by conflict,
-            # keep short/partial contours in processing.
-            if len(pts) >= 5:
-                center_px, axes_px, ang = _ellipse_props_px(pts)
-                geom = (center_px, axes_px, ang, False)
-            elif len(pts) >= 3:
-                (cx, cy), r = cv2.minEnclosingCircle(pts.astype(np.float32))
-                d = 2.0 * float(r)
-                center_px = np.array([cx, cy], dtype=np.float32)
-                geom = (center_px, (d, d), 0.0, True)
-            else:
-                geom = None
+        geom = _hole_geom_from_poly(pts)
 
         if geom is None:
             if verbose and len(pts) >= 3 and not ALLOW_SHORT_HOLE_FALLBACK:
@@ -507,16 +495,6 @@ def measure_board(
                 print(
                     "[WARN] oval hole ignored:",
                     f"major={maj_mm:.3f} minor={min_mm:.3f} ratio={ratio:.3f} lim={lim:.3f} dia={dia:.3f}",
-                )
-            continue
-
-        circularity = _contour_circularity(pts)
-        if (not used_circle_fallback) and (not _passes_circularity_filter(circularity=circularity, diameter_mm=dia)):
-            if verbose:
-                lim = LARGE_HOLE_MIN_CIRCULARITY if dia >= LARGE_HOLE_DIAM_MM else MIN_CIRCULARITY
-                print(
-                    "[WARN] low-circularity hole ignored:",
-                    f"circ={circularity:.3f} lim={lim:.3f} dia={dia:.3f}",
                 )
             continue
 
@@ -556,13 +534,19 @@ def measure_board(
             dist_bot=dist_bot,
             dist_top=dist_top,
             radius_mm=radius_mm,
+            diameter_mm=dia,
         ):
             if verbose:
-                outside_threshold = -(OUTSIDE_MARGIN_MM + radius_mm)
-                print(
-                    "[WARN] hole outside OBB:",
-                    f"L={dist_left:.3f} R={dist_right:.3f} B={dist_bot:.3f} T={dist_top:.3f} thr={outside_threshold:.3f}",
+                adaptive_margin = max(OUTSIDE_MARGIN_MM, 0.05 * max(dia, 0.0))
+                outside_threshold = -(adaptive_margin + radius_mm)
+                msg = (
+                    "hole outside OBB: "
+                    f"L={dist_left:.3f} R={dist_right:.3f} B={dist_bot:.3f} T={dist_top:.3f} "
+                    f"thr={outside_threshold:.3f} cen=({center_px[0]:.2f},{center_px[1]:.2f}) "
+                    f"obb_cen=({geo['center_mm'][0]:.2f},{geo['center_mm'][1]:.2f})"
                 )
+                print(f"[WARN] {msg}")
+                logger.warning(msg)
             continue
 
         if verbose and (

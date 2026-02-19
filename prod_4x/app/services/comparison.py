@@ -15,12 +15,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
 
-# ─── compare.py ─────────────────────────────────────────────────────────
-GRID = 0.5  # Шаг сетки CAD
+from app.utils.geometry import snap_to_grid
 
+# ─── compare.py ─────────────────────────────────────────────────────────
 def _snap(v: float) -> float:
     """Округляет значение до ближайшего кратного GRID."""
-    return round(v / GRID) * GRID
+    return snap_to_grid(v)
 
 def dims(d: dict) -> tuple[float, float]:
     if "length" in d and "width" in d:          # CAD

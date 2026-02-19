@@ -46,18 +46,14 @@ def make_quarantine_dir(root: Path, cad_data: dict) -> Path:
     return root / f"{product}_{position}_{datepart}_{timepart}"
 
 
-def deduplicate_file(path: Path, thickness: float):
-    """Удалить дубликаты точек в файле"""
-    raw = path.read_text(encoding='utf-8').splitlines()
-    cleaned = []
-    for ln in raw:
+def deduplicate_lines(lines: list[str], thickness: float) -> list[str]:
+    """Удалить дубликаты и выполнить border-filter для class=0 в памяти."""
+    cleaned: list[str] = []
+    for ln in lines:
         ln = dedup.remove_duplicate_points_in_line(ln)
-        if not ln:
-            continue
-        ln = dedup.keep_border_points_in_line(ln, thickness=thickness)
         if ln:
             cleaned.append(ln)
-    path.write_text('\n'.join(cleaned), encoding='utf-8')
+    return dedup.filter_class0_bulk(cleaned, thickness=thickness)
 
 
 def is_ignorable_failure(qc: dict) -> bool:
@@ -191,16 +187,19 @@ def process_single(
             if not lines:
                 raise RuntimeError("YOLO не нашел объектов")
 
-            all_coords = tmproot / "all_coords.txt"
-            t2c.save_labels(lines, all_coords)
-
-            # ===== ЭТАП 4: Объединение координат =====
-            logger.info(f"[{stem}] Merging coordinates")
-            mergecoords.main(str(all_coords), str(merged_path))
-
-            # ===== ЭТАП 5: Дедупликация =====
+            # ===== ЭТАП 4: Дедупликация в памяти =====
             logger.info(f"[{stem}] Deduplicating points")
-            deduplicate_file(merged_path, thickness)
+            lines = deduplicate_lines(lines, thickness)
+            if not lines:
+                raise RuntimeError("После дедупликации не осталось валидных контуров")
+
+            # ===== ЭТАП 5: Объединение координат в памяти =====
+            logger.info(f"[{stem}] Merging coordinates")
+            merged = mergecoords.main(inputpath=None, inputlines=lines)
+            if merged is None:
+                raise RuntimeError("mergecoords.main вернул пустой результат")
+            cls0_final, cls1_final, cls3_final = merged
+            mergecoords.write_out(merged_path, cls0_final, cls1_final, cls3_final)
 
             # ===== ЭТАП 6: Измерения =====
             logger.info(f"[{stem}] Running measurements")

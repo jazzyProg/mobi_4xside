@@ -64,7 +64,7 @@ def write_out(path: str | Path, cls0: Contour, cls1: list[Contour], cls3: list[C
         write_contour_line(lines, 1, c)
     for c in cls3:
         # легкая очистка от подряд идущих дубликатов
-        c_clean = remove_consecutive_duplicates(c, 0.1)
+        c_clean = remove_consecutive_duplicates(c, 0.01)
         write_contour_line(lines, 3, c_clean)
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -281,16 +281,18 @@ def main(inputpath: str | Path,
             centers_list.append((cx, cy))
         centers = np.array(centers_list, dtype=np.float32)
 
-        # Оставляем вашу логику EPS, но центры теперь стабильнее
-        eps1 = max(25.0, min(60.0, dynamic_eps(centers, mul=1.25, clamp=(20.0, 80.0))))
+        eps1 = dynamic_eps(centers, mul=2.5, clamp=(25.0, 300.0))
 
         labels1 = cluster_labels_eps(centers, eps=eps1)
         clusters1: dict[int, list[Contour]] = defaultdict(list)
         for idx, lab in enumerate(labels1):
             clusters1[int(lab)].append(cls1raw[idx])
 
-        cls1_final = [combine_cluster_contours_np(cl) for cl in clusters1.values()]
-        cls1_final = [c for c in cls1_final if len(c) >= 3]
+        cls1_final = []
+        for cl in clusters1.values():
+            combined = combine_cluster_contours_np(cl)
+            if len(combined) > 10:
+                cls1_final.append(combined)
 
     # Class 3: только фильтр по длине
     cls3_final = [c for c in cls3raw if len(c) >= 3]
