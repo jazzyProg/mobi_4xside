@@ -35,17 +35,25 @@ from app.utils.geometry import ALPHA_X, ALPHA_Y, DIAM_MIN, DIAM_MAX, snap_to_gri
 logger = logging.getLogger(__name__)
 
 # ───────── калибровка ─────────
-MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.20"))
-LARGE_HOLE_MAX_AXIS_RATIO = float(os.getenv("HOLE_LARGE_OVALITY_MAX_RATIO", "1.65"))
-MIN_CIRCULARITY = float(os.getenv("HOLE_MIN_CIRCULARITY", "0.60"))
+# NOTE:
+# The defaults below intentionally stay close to the legacy measurement script.
+# In production we've seen valid YOLO hole masks become slightly elliptical after
+# perspective/segmentation artifacts. Too-strict gates cause "detected by model,
+# missing in final JSON" incidents.
+MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "2.70"))
+LARGE_HOLE_MAX_AXIS_RATIO = float(os.getenv("HOLE_LARGE_OVALITY_MAX_RATIO", "3.00"))
+MIN_CIRCULARITY = float(os.getenv("HOLE_MIN_CIRCULARITY", "0.30"))
 LARGE_HOLE_DIAM_MM = float(os.getenv("HOLE_LARGE_DIAM_MM", "25.0"))
-LARGE_HOLE_MIN_CIRCULARITY = float(os.getenv("HOLE_LARGE_MIN_CIRCULARITY", "0.35"))
+LARGE_HOLE_MIN_CIRCULARITY = float(os.getenv("HOLE_LARGE_MIN_CIRCULARITY", "0.18"))
 NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.20"))
 CONCENTRIC_CENTER_TOL_MM = float(os.getenv("HOLE_CONCENTRIC_CENTER_TOL_MM", "0.35"))
 CONCENTRIC_DIA_RATIO_MAX = float(os.getenv("HOLE_CONCENTRIC_DIA_RATIO_MAX", "1.45"))
 OVERLAP_DUP_RATIO_MIN = float(os.getenv("HOLE_OVERLAP_DUP_RATIO_MIN", "0.60"))
 OVERLAP_DUP_CENTER_RATIO_MAX = float(os.getenv("HOLE_OVERLAP_DUP_CENTER_RATIO_MAX", "0.35"))
 OVERLAP_DUP_DIA_RATIO_MAX = float(os.getenv("HOLE_OVERLAP_DUP_DIA_RATIO_MAX", "2.20"))
+SMALL_HOLE_DIAM_MM = float(os.getenv("HOLE_SMALL_DIAM_MM", "14.0"))
+SMALL_HOLE_CONCENTRIC_DIA_RATIO_MAX = float(os.getenv("HOLE_SMALL_CONCENTRIC_DIA_RATIO_MAX", "1.20"))
+SMALL_HOLE_OVERLAP_DIA_RATIO_MAX = float(os.getenv("HOLE_SMALL_OVERLAP_DIA_RATIO_MAX", "1.35"))
 ALLOW_SHORT_HOLE_FALLBACK = os.getenv("HOLE_ALLOW_SHORT_CONTOUR_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
 TAU_MM, K_RANSAC, MIN_FRACTION = 0.25, 150, 0.15
 NEAR_STEP_MM = 0.10
@@ -208,7 +216,12 @@ def _is_concentric_duplicate(*, center_a_mm: np.ndarray, dia_a_mm: float, center
 
     d_small = max(min(float(dia_a_mm), float(dia_b_mm)), 1e-6)
     d_large = max(float(dia_a_mm), float(dia_b_mm))
-    return (d_large / d_small) <= max(max_dia_ratio, 1.0)
+
+    effective_ratio_max = max(max_dia_ratio, 1.0)
+    if d_small <= SMALL_HOLE_DIAM_MM:
+        effective_ratio_max = min(effective_ratio_max, max(SMALL_HOLE_CONCENTRIC_DIA_RATIO_MAX, 1.0))
+
+    return (d_large / d_small) <= effective_ratio_max
 
 
 def _circle_intersection_area(radius_a: float, radius_b: float, center_distance: float) -> float:
@@ -242,7 +255,11 @@ def _is_overlap_duplicate(*, center_a_mm: np.ndarray, dia_a_mm: float, center_b_
     d_small = max(min(float(dia_a_mm), float(dia_b_mm)), 1e-6)
     d_large = max(float(dia_a_mm), float(dia_b_mm))
 
-    if (d_large / d_small) > max(dia_ratio_max, 1.0):
+    effective_ratio_max = max(dia_ratio_max, 1.0)
+    if d_small <= SMALL_HOLE_DIAM_MM:
+        effective_ratio_max = min(effective_ratio_max, max(SMALL_HOLE_OVERLAP_DIA_RATIO_MAX, 1.0))
+
+    if (d_large / d_small) > effective_ratio_max:
         return False
     if center_distance > d_small * max(center_ratio_max, 0.0):
         return False
