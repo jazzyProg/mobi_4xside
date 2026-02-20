@@ -30,10 +30,10 @@ import cv2
 import numpy as np
 
 # ───────── калибровка ─────────
-ALPHA_X, ALPHA_Y = 0.10930, 0.09820  # мм / px
-DIAM_MIN, DIAM_MAX = 2.0, 40.0
-MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.20"))
-NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.20"))
+ALPHA_X, ALPHA_Y = 0.10910, 0.09800  # мм / px
+DIAM_MIN, DIAM_MAX = 2.0, 45.0
+MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.70"))
+NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.0"))
 TAU_MM, K_RANSAC, MIN_FRACTION = 0.25, 150, 0.15
 GRID = 0.5  # Шаг сетки CAD
 NEAR_STEP_MM = 0.10
@@ -155,11 +155,13 @@ def _is_oval_hole(maj_mm: float, min_mm: float, *, max_axis_ratio: float = MAX_A
 
 def _is_nested_hole(*, inner_center_mm: np.ndarray, inner_dia_mm: float, outer_center_mm: np.ndarray, outer_dia_mm: float,
                     margin_mm: float = NESTED_HOLE_MARGIN_MM) -> bool:
-    """Return True if `inner` is geometrically contained by `outer` (with configurable tolerance)."""
+    """Return True if the center of the smaller hole is inside the larger hole."""
     center_distance = float(math.hypot(*(inner_center_mm - outer_center_mm)))
-    inner_radius = max(float(inner_dia_mm), 0.0) / 2.0
     outer_radius = max(float(outer_dia_mm), 0.0) / 2.0
-    return center_distance + inner_radius <= outer_radius + max(margin_mm, 0.0)
+
+    # Так как каскадных отверстий не бывает, любое меньшее отверстие,
+    # центр которого попал внутрь бОльшего (с учетом небольшого допуска) - это артефакт сегментации.
+    return center_distance <= (outer_radius + max(margin_mm, 0.0))
 
 # ───────── прямоугольник через OBB ─────────
 def _fit_rectangle(poly_px: np.ndarray, img):

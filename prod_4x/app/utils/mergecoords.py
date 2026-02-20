@@ -144,11 +144,17 @@ def dynamic_eps(centroids: np.ndarray,
     val = float(base * mul)
     return float(np.clip(val, clamp[0], clamp[1]))
 
-def combine_cluster_contours_np(cluster: list[Contour]) -> Contour:
+def combine_cluster_contours_np(cluster: list[Contour], is_hole: bool = False) -> Contour:
     """Combine contours of the kept cluster into one ordered polygon."""
     pts = np.vstack(cluster, dtype=np.float32)
     if pts.shape[0] < 3:
         return []
+
+    if is_hole:
+        # Для круглых отверстий выпуклая оболочка идеально убирает
+        # прямые линии разрезов тайлов внутри контура
+        hull = cv2.convexHull(pts).reshape(-1, 2)
+        return [(float(x), float(y)) for x, y in hull]
     # Мягкое округление: шаг 0.5 px, затем удаление дубликатов
     rounded = np.round(pts * 2) / 2
     uniq, uniqidx = np.unique(rounded, axis=0, return_index=True)
@@ -281,16 +287,18 @@ def main(inputpath: str | Path,
             centers_list.append((cx, cy))
         centers = np.array(centers_list, dtype=np.float32)
 
-        # Оставляем вашу логику EPS, но центры теперь стабильнее
-        eps1 = max(25.0, min(60.0, dynamic_eps(centers, mul=1.25, clamp=(20.0, 80.0))))
+        # Увеличиваем лимиты eps1 до 250, чтобы половинки больших отверстий тоже находили друг друга
+        eps1 = max(25.0, min(250.0, dynamic_eps(centers, mul=1.5, clamp=(30.0, 250.0))))
 
         labels1 = cluster_labels_eps(centers, eps=eps1)
         clusters1: dict[int, list[Contour]] = defaultdict(list)
         for idx, lab in enumerate(labels1):
             clusters1[int(lab)].append(cls1raw[idx])
 
-        cls1_final = [combine_cluster_contours_np(cl) for cl in clusters1.values()]
+        # Передаем is_hole=True для корректного слияния контуров отверстия
+        cls1_final = [combine_cluster_contours_np(cl, is_hole=True) for cl in clusters1.values()]
         cls1_final = [c for c in cls1_final if len(c) >= 3]
+
 
     # Class 3: только фильтр по длине
     cls3_final = [c for c in cls3raw if len(c) >= 3]
