@@ -30,7 +30,7 @@ import cv2
 import numpy as np
 
 # ───────── калибровка ─────────
-ALPHA_X, ALPHA_Y = 0.10910, 0.09800  # мм / px
+ALPHA_X, ALPHA_Y = 0.10890, 0.09780  # мм / px
 DIAM_MIN, DIAM_MAX = 2.0, 45.0
 MAX_AXIS_RATIO = float(os.getenv("HOLE_OVALITY_MAX_RATIO", "1.70"))
 NESTED_HOLE_MARGIN_MM = float(os.getenv("NESTED_HOLE_MARGIN_MM", "0.0"))
