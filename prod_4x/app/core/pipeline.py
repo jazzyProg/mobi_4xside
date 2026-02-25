@@ -9,9 +9,8 @@ import shutil
 import tempfile
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Optional
-
 import logging
 
 # Импорты с учетом новой структуры и переименований
@@ -40,7 +39,7 @@ def make_quarantine_dir(root: Path, cad_data: dict) -> Path:
     """Создать папку карантина на основе CAD данных"""
     product = slugify(str(cad_data.get('product_name', 'detail')))
     position = slugify(str(cad_data.get('position', '0')))
-    now = datetime.now()
+    now = datetime.now(ZoneInfo(settings.TIMEZONE))
     datepart = now.strftime('%d%m%Y')
     timepart = now.strftime('%H%M%S')
     return root / f"{product}_{position}_{datepart}_{timepart}"
@@ -260,8 +259,8 @@ def process_single(
                         compare.compare(
                             cad_json_path,
                             vision_json,
-                            outdir / diff_txt.name,
-                            outdir / dev_plot.name,
+                            diff_txt,
+                            dev_plot,
                             csv_file=outdir / diff_csv.name,
                             dpi=dpi
                         )
@@ -270,7 +269,7 @@ def process_single(
                         logger.warning(f"[{stem}] Compare failed: {exc}")
 
                 # ИСПРАВЛЕНО: безопасно копируем промежуточные файлы
-                for p in [annotated_jpg, merged_path, vision_json]:
+                for p in [annotated_jpg, vision_json]:
                     if p.exists():
                         shutil.copy2(p, outdir / p.name)
 

@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     QUALITY_CHECK_ENABLED: bool = Field(default=True)
     CAMERA_TRIGGER_PULSE_SEC: float = Field(default=1.0, ge=0.1, le=60.0)
 
+    # ===== Timezone =====
+    # Used for quarantine folder timestamps. Set explicitly to avoid container TZ drift.
+    TIMEZONE: str = Field(default="Europe/Moscow")
+
     # ===== Camera / SHM =====
     # Keep as explicit URL for FIFO endpoint to preserve old code paths.
     CAMERA_METADATA_URL: str = Field(default="http://localhost:8003/frames/oldest/meta")
