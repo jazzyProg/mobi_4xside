@@ -73,6 +73,22 @@ class PeriodicHeartbeat:
             self._schedule_next()
 
 
+@dataclass
+class RetryBackoff:
+    base_sec: float
+    max_sec: float
+    factor: float = 2.0
+    _attempt: int = 0
+
+    def reset(self) -> None:
+        self._attempt = 0
+
+    def next_sleep(self) -> float:
+        delay = min(self.max_sec, self.base_sec * (self.factor ** self._attempt))
+        self._attempt += 1
+        return delay
+
+
 def _resolve_camera_shm_name(settings: Settings, client: ExternalServicesClient) -> str:
     """Resolve SHM name from Camera /status with fallback to config."""
     try:
@@ -136,21 +152,27 @@ def qc_loop(settings: Settings | None = None) -> None:
 
     heartbeat = PeriodicHeartbeat(api_client, HeartbeatConfig())
     heartbeat.start()
+    camera_backoff = RetryBackoff(base_sec=0.5, max_sec=5.0)
+    duplicate_frame_hits = 0
+    last_seen_fid: int | None = None
 
     while not state.stop_event.is_set():
         try:
             # 1) Fetch oldest frame metadata (FIFO)
             try:
                 frame_meta = api_client.get_oldest_frame_metadata()
+                camera_backoff.reset()
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404:
                     time.sleep(0.5)
                     continue
                 log.warning("Unexpected status from camera API: %s", e.response.status_code)
-                time.sleep(0.5)
+                time.sleep(camera_backoff.next_sleep())
                 continue
             except Exception:
-                time.sleep(1.0)
+                delay = camera_backoff.next_sleep()
+                log.warning("Camera API unavailable, retry in %.2fs", delay)
+                time.sleep(delay)
                 continue
 
             fid = frame_meta.get("frame_id")
@@ -161,9 +183,32 @@ def qc_loop(settings: Settings | None = None) -> None:
 
             # Duplicate guard
             if fid <= state.last_processed_id:
-                log.debug("Skipping frame %s: already processed (last_processed_id=%s)", fid, state.last_processed_id)
+                duplicate_frame_hits = duplicate_frame_hits + 1 if last_seen_fid == fid else 1
+                last_seen_fid = fid
+                if duplicate_frame_hits >= 20:
+                    log.warning(
+                        "Frame %s already processed and stuck as oldest for %s polls; "
+                        "attempting forced delete",
+                        fid,
+                        duplicate_frame_hits,
+                    )
+                    try:
+                        api_client.delete_camera_frame(int(fid))
+                        log.info("Stale frame %s deleted from queue", fid)
+                        duplicate_frame_hits = 0
+                    except Exception as e:
+                        log.error("Failed to delete stale frame %s: %s", fid, e)
+                else:
+                    log.debug(
+                        "Skipping frame %s: already processed (last_processed_id=%s, hit=%s)",
+                        fid,
+                        state.last_processed_id,
+                        duplicate_frame_hits,
+                    )
                 time.sleep(0.05)
                 continue
+            duplicate_frame_hits = 0
+            last_seen_fid = fid
 
             storage_loc = frame_meta.get("storage_location")
             if storage_loc != "shm":
@@ -180,10 +225,23 @@ def qc_loop(settings: Settings | None = None) -> None:
             log.info("Attempting to read frame %s from SHM slot %s", fid, shm_slot)
 
             # 2) Read bytes from SHM
-            reader = _ensure_shm_reader(settings, shm_name)
+            try:
+                reader = _ensure_shm_reader(settings, shm_name)
+            except Exception as e:
+                log.error("SHM reader init failed: %s", e)
+                _cleanup_shm_reader()
+                time.sleep(camera_backoff.next_sleep())
+                continue
+
             frame_data = None
             for attempt in range(3):
-                frame_data, _slot_md = reader.read_slot(int(shm_slot))
+                try:
+                    frame_data, _slot_md = reader.read_slot(int(shm_slot))
+                except Exception as e:
+                    log.error("SHM read failed for slot %s: %s", shm_slot, e)
+                    _cleanup_shm_reader()
+                    frame_data = None
+                    break
                 if frame_data:
                     break
                 if attempt < 2:
@@ -290,6 +348,9 @@ def qc_loop(settings: Settings | None = None) -> None:
             except Exception as e:
                 log.error("Failed to delete frame %s: %s", fid, e)
                 time.sleep(1.0)
+            else:
+                duplicate_frame_hits = 0
+                last_seen_fid = None
 
         except Exception as e:
             log.error("Loop error: %s", e, exc_info=True)
