@@ -6,6 +6,7 @@ from pathlib import Path
 
 def test_quarantine_saves_only_required_artifacts(monkeypatch, tmp_path: Path):
     from app.core import pipeline
+    monkeypatch.setattr(pipeline.settings, "DEBUG_MODE", True, raising=False)
 
     class DummyClient:
         def get_active_product(self):
@@ -66,6 +67,45 @@ def test_quarantine_saves_only_required_artifacts(monkeypatch, tmp_path: Path):
     assert "cam_1539_dev.jpg" not in files
     assert "cam_1539_diff.txt" not in files
     assert "cam_1539_merged.txt" not in files
+
+
+def test_quarantine_not_saved_when_debug_disabled(monkeypatch, tmp_path: Path):
+    from app.core import pipeline
+    monkeypatch.setattr(pipeline.settings, "DEBUG_MODE", False, raising=False)
+
+    class DummyClient:
+        def get_active_product(self):
+            return {"product_name": "B60", "position": "56_1", "holes": []}
+
+    class DummyQC:
+        ok = False
+
+        def to_dict(self):
+            return {"ok": False, "error": "failed"}
+
+    monkeypatch.setattr(pipeline, "get_api_client", lambda: DummyClient(), raising=True)
+    monkeypatch.setattr(pipeline.slice_module, "slice_jpeg_bytes_to_memory", lambda _b: [b"tile"], raising=True)
+    monkeypatch.setattr(pipeline.inference, "run_inference_on_tiles_seq", lambda **_k: None, raising=True)
+    monkeypatch.setattr(pipeline.t2c, "collect_labels", lambda _p: ["1 2 3"], raising=True)
+    monkeypatch.setattr(pipeline.t2c, "save_labels", lambda _lines, p: Path(p).write_text("1 2 3", encoding="utf-8"), raising=True)
+    monkeypatch.setattr(pipeline.mergecoords, "main", lambda _src, dst: Path(dst).write_text("merged", encoding="utf-8"), raising=True)
+    monkeypatch.setattr(pipeline, "deduplicate_file", lambda _p, _t: None, raising=True)
+    monkeypatch.setattr(pipeline.measure5, "measure_board", lambda *_a: ({}, [], str(tmp_path / "vision.json")), raising=True)
+    monkeypatch.setattr(pipeline, "qc_check_files", lambda *_a, **_k: DummyQC(), raising=True)
+
+    model = tmp_path / "best.pt"
+    model.write_text("x", encoding="utf-8")
+    qdir = tmp_path / "quarantine"
+
+    ok, _vision_path, _qc = pipeline.process_single(
+        b"fake-jpg",
+        modelpath=model,
+        quarantinedir=qdir,
+        stemname="cam_1539",
+    )
+
+    assert ok is False
+    assert not qdir.exists()
 
 
 def test_make_quarantine_dir_uses_configured_timezone(monkeypatch, tmp_path: Path):

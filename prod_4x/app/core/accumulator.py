@@ -83,7 +83,7 @@ def _reset_shift_if_needed() -> None:
 
 
 def _save_accumulated_failure_artifact(error_type: str, count: int, samples: list[dict[str, Any]]) -> None:
-    """Persist single aggregated artifact folder: 5 photos + JSON reason."""
+    """Persist single alarm dossier: 5 photos + JSON with root causes."""
     if error_type == "general" or not samples:
         return
 
@@ -111,7 +111,14 @@ def _save_accumulated_failure_artifact(error_type: str, count: int, samples: lis
         "accumulated_count": count,
         "timestamp": now.isoformat(),
         "samples_count": min(len(samples), 5),
-        "sample_frames": [sample.get("frame_id") for sample in samples[:5]],
+        "samples": [
+            {
+                "frame_id": sample.get("frame_id"),
+                "timestamp": sample.get("timestamp"),
+                "report": sample.get("report", {}),
+            }
+            for sample in samples[:5]
+        ],
     }
     (out_dir / "defect_summary.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
@@ -159,6 +166,7 @@ def increment_counters(report: dict, frame_data: bytes | None = None, frame_id: 
 
     with accumulator.lock:
         _reset_shift_if_needed()
+        alarm_triggered_this_report = False
         for key in errors:
             accumulator.counters[key] += 1
             accumulator.last_increment[key] = True
@@ -169,6 +177,7 @@ def increment_counters(report: dict, frame_data: bytes | None = None, frame_id: 
                     {
                         "frame_id": frame_id,
                         "frame_data": frame_data,
+                        "report": report,
                         "timestamp": datetime.now(ZoneInfo(settings.TIMEZONE)).isoformat(),
                     }
                 )
@@ -177,7 +186,12 @@ def increment_counters(report: dict, frame_data: bytes | None = None, frame_id: 
 
             # Проверка превышения порога
             threshold = THRESHOLDS.get(key)
-            if threshold and accumulator.counters[key] >= threshold:
+            if (
+                threshold
+                and accumulator.counters[key] >= threshold
+                and not accumulator.alarm_active
+                and not alarm_triggered_this_report
+            ):
                 if key in accumulator.sample_frames and not accumulator.artifact_saved_for_streak[key]:
                     _save_accumulated_failure_artifact(
                         key,
@@ -186,6 +200,7 @@ def increment_counters(report: dict, frame_data: bytes | None = None, frame_id: 
                     )
                     accumulator.artifact_saved_for_streak[key] = True
                 trigger_alarm(key, accumulator.counters[key])
+                alarm_triggered_this_report = True
         state.stats["shift"]["accumulated_failures_total"] += 1
 
 
