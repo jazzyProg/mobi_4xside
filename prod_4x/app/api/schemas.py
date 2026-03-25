@@ -23,7 +23,7 @@ class CheckResponse(BaseModel):
 class StatusResponse(BaseModel):
     """Статус сервиса"""
     running: bool = Field(..., description="Работает ли background loop")
-    current_frame_id: int = Field(..., description="ID последнего обработанного кадра")
+    current_frame_id: Optional[int] = Field(None, description="ID последнего обработанного кадра")
     stats: Dict[str, Any] = Field(..., description="Статистика обработки")
 
 
