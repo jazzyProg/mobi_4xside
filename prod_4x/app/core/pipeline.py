@@ -232,8 +232,8 @@ def process_single(
             error_msg = str(exc)
             logger.error(f"[{stem}] Pipeline failed: {exc}", exc_info=True)
 
-        # ===== ИСПРАВЛЕНО: Карантин при неудаче (всегда сохраняем) =====
-        if not qc_ok and not is_ignorable_failure(qc_dict):
+        # ===== Карантин при неудаче: только в DEBUG_MODE =====
+        if settings.DEBUG_MODE and not qc_ok and not is_ignorable_failure(qc_dict):
             logger.info(f"[{stem}] Saving to quarantine")
 
             try:
