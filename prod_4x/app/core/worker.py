@@ -12,6 +12,8 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -182,7 +184,7 @@ def qc_loop(settings: Settings | None = None) -> None:
                 continue
 
             # Duplicate guard
-            if fid <= state.last_processed_id:
+            if state.last_processed_id is not None and fid <= state.last_processed_id:
                 duplicate_frame_hits = duplicate_frame_hits + 1 if last_seen_fid == fid else 1
                 last_seen_fid = fid
                 if duplicate_frame_hits >= 20:
@@ -301,6 +303,7 @@ def qc_loop(settings: Settings | None = None) -> None:
             # ============ КОНЕЦ ИСПРАВЛЕНИЯ ============
 
             # 3) Process frame
+            state.start_new_detail()
             state.stats["last_status"] = "processing"
             log.info("Processing frame %s (oldest in queue)", fid)
 
@@ -313,11 +316,10 @@ def qc_loop(settings: Settings | None = None) -> None:
             )
 
             state.last_processed_id = int(fid)
-            state.stats["processed"] += 1
+            state.register_detail_result(qc_ok)
 
             # 4) Update stats + signals + accumulator
             if qc_ok:
-                state.stats["passed"] += 1
                 state.stats["last_status"] = "PASS"
                 try:
                     reset_counters_on_pass()
@@ -330,10 +332,9 @@ def qc_loop(settings: Settings | None = None) -> None:
                 except Exception as e:
                     log.warning("Failed to send success signal: %s", e)
             else:
-                state.stats["failed"] += 1
                 state.stats["last_status"] = "FAIL"
                 try:
-                    increment_counters(report)
+                    increment_counters(report, frame_data=frame_data, frame_id=int(fid))
                 except Exception as e:
                     log.error("Accumulator increment failed: %s", e)
 
@@ -341,6 +342,17 @@ def qc_loop(settings: Settings | None = None) -> None:
                     api_client.signal_fail()
                 except Exception as e:
                     log.warning("Failed to send fail signal: %s", e)
+
+            if settings.DEBUG_MODE:
+                try:
+                    debug_dir = Path(settings.DEBUG_LOG_DIR)
+                    debug_dir.mkdir(parents=True, exist_ok=True)
+                    debug_log = debug_dir / f"qc-debug-{datetime.now().strftime('%Y%m%d')}.log"
+                    debug_log.open("a", encoding="utf-8").write(
+                        f"{datetime.now().isoformat()} frame={fid} result={'PASS' if qc_ok else 'FAIL'} report={report}\n"
+                    )
+                except Exception as e:
+                    log.warning("Failed to write debug log: %s", e)
 
             # 5) Delete frame to free slot
             try:
