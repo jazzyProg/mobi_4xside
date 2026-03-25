@@ -334,7 +334,7 @@ def qc_loop(settings: Settings | None = None) -> None:
             else:
                 state.stats["last_status"] = "FAIL"
                 try:
-                    increment_counters(report)
+                    increment_counters(report, frame_data=frame_data, frame_id=int(fid))
                 except Exception as e:
                     log.error("Accumulator increment failed: %s", e)
 

@@ -32,7 +32,7 @@ services:
             - DEBUG_MODE=${DEBUG_MODE:-false}
             - DEBUG_LOG_DIR=/app/logs/debug
             - QUALITY_CHECK_ENABLED=true
-            - CAMERA_TRIGGER_PULSE_SEC=1.6
+            - CAMERA_TRIGGER_PULSE_SEC=1.8
             - BRAK_BASE_DIR=/mnt/hdd/brak
 
         volumes:
@@ -84,7 +84,7 @@ services:
             - LOG_LEVEL=INFO
             - SIGNALS_API_URL=http://localhost:8002
             - QUALITY_CHECK_ENABLED=true
-            - CAMERA_TRIGGER_PULSE_SEC=1.6
+            - CAMERA_TRIGGER_PULSE_SEC=1.8
             - DEBUG_MODE=${DEBUG_MODE:-false}
 
         volumes:
@@ -111,10 +111,10 @@ services:
             - MODBUS_SLAVE_ID=1
             - BIT_SUCCESS=3
             - BIT_FAIL=2
-            - BIT_ALARM=4
+            - BIT_ALARM=7
             - BIT_HEARTBEAT=5
             - BIT_CAMERA_TRIGGER=6
-            - CAMERA_TRIGGER_DURATION_SEC=1.6
+            - CAMERA_TRIGGER_DURATION_SEC=1.8
             - HOST=0.0.0.0
             - PORT=8002
             - LOG_LEVEL=INFO

@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # ===== Signal behavior =====
     QUALITY_CHECK_ENABLED: bool = Field(default=True)
-    CAMERA_TRIGGER_PULSE_SEC: float = Field(default=1.0, ge=0.1, le=60.0)
+    CAMERA_TRIGGER_PULSE_SEC: float = Field(default=1.8, ge=0.1, le=60.0)
 
     # ===== Timezone =====
     # Used for quarantine folder timestamps. Set explicitly to avoid container TZ drift.

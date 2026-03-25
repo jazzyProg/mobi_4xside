@@ -6,7 +6,7 @@ import logging
 import json
 from datetime import datetime, time
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Any
 from zoneinfo import ZoneInfo
 
 from app.config import settings
@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 # Пороги накопления для alarm
 # ============================================
 THRESHOLDS = {
-    "diameter": 30000,        # 3 ошибки по диаметру → alarm
-    "holes": 30000,           # 3 ошибки по отверстиям → alarm
-    "rectangles": 200000,      # 2 ошибки по прямоугольникам → alarm
+    "diameter": 5,            # 5 ошибок по диаметру → alarm
+    "holes": 5,               # 5 ошибок по отверстиям → alarm
+    "rectangles": 5,          # 5 ошибок по прямоугольникам → alarm
     "general": 500000,         # 5 общих ошибок → alarm
 }
 
@@ -45,6 +45,16 @@ class AccumulatorState:
         self.lock = threading.Lock()
         self.alarm_active = False
         self.shift_key = ""
+        self.sample_frames: Dict[str, list[dict[str, Any]]] = {
+            "diameter": [],
+            "holes": [],
+            "rectangles": [],
+        }
+        self.artifact_saved_for_streak: Dict[str, bool] = {
+            "diameter": False,
+            "holes": False,
+            "rectangles": False,
+        }
 
 accumulator = AccumulatorState()
 
@@ -67,11 +77,14 @@ def _reset_shift_if_needed() -> None:
         accumulator.last_increment[key] = False
     accumulator.alarm_active = False
     accumulator.shift_key = shift_key
+    for key in accumulator.sample_frames:
+        accumulator.sample_frames[key] = []
+        accumulator.artifact_saved_for_streak[key] = False
 
 
-def _save_accumulated_failure_artifact(error_type: str, count: int) -> None:
-    """Persist accumulated fail count for current product/reason."""
-    if error_type == "general":
+def _save_accumulated_failure_artifact(error_type: str, count: int, samples: list[dict[str, Any]]) -> None:
+    """Persist single aggregated artifact folder: 5 photos + JSON reason."""
+    if error_type == "general" or not samples:
         return
 
     try:
@@ -82,17 +95,25 @@ def _save_accumulated_failure_artifact(error_type: str, count: int) -> None:
 
     now = datetime.now(ZoneInfo(settings.TIMEZONE))
     product_name = str(active_product.get("product_name", "unknown"))
-    folder_name = f"{product_name}_{now.strftime('%Y%m%d_%H%M%S')}_{error_type}"
+    folder_name = f"{product_name}_{now.strftime('%Y%m%d_%H%M%S')}_{error_type}_accumulated"
 
     out_dir = Path(settings.BRAK_BASE_DIR) / folder_name
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    for idx, sample in enumerate(samples[:5], start=1):
+        frame_id = sample.get("frame_id", "unknown")
+        img_data: bytes = sample.get("frame_data", b"")
+        (out_dir / f"detail_{idx:02d}_frame_{frame_id}.jpg").write_bytes(img_data)
+
     payload = {
         "product_name": product_name,
         "reason": error_type,
         "accumulated_count": count,
         "timestamp": now.isoformat(),
+        "samples_count": min(len(samples), 5),
+        "sample_frames": [sample.get("frame_id") for sample in samples[:5]],
     }
-    (out_dir / "accumulated_count.json").write_text(
+    (out_dir / "defect_summary.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -127,7 +148,7 @@ def parse_qc_report(report: dict) -> list[str]:
     return errors
 
 
-def increment_counters(report: dict) -> None:
+def increment_counters(report: dict, frame_data: bytes | None = None, frame_id: int | None = None) -> None:
     """
     Инкрементировать счетчики на основе QC отчета при FAIL
     """
@@ -143,11 +164,27 @@ def increment_counters(report: dict) -> None:
             accumulator.last_increment[key] = True
 
             logger.info(f"ACCUM: {key} incremented to {accumulator.counters[key]}/{THRESHOLDS.get(key, 999)}")
-            _save_accumulated_failure_artifact(key, accumulator.counters[key])
+            if key in accumulator.sample_frames and frame_data:
+                accumulator.sample_frames[key].append(
+                    {
+                        "frame_id": frame_id,
+                        "frame_data": frame_data,
+                        "timestamp": datetime.now(ZoneInfo(settings.TIMEZONE)).isoformat(),
+                    }
+                )
+                if len(accumulator.sample_frames[key]) > 5:
+                    accumulator.sample_frames[key] = accumulator.sample_frames[key][-5:]
 
             # Проверка превышения порога
             threshold = THRESHOLDS.get(key)
             if threshold and accumulator.counters[key] >= threshold:
+                if key in accumulator.sample_frames and not accumulator.artifact_saved_for_streak[key]:
+                    _save_accumulated_failure_artifact(
+                        key,
+                        accumulator.counters[key],
+                        accumulator.sample_frames[key],
+                    )
+                    accumulator.artifact_saved_for_streak[key] = True
                 trigger_alarm(key, accumulator.counters[key])
         state.stats["shift"]["accumulated_failures_total"] += 1
 
@@ -163,6 +200,9 @@ def reset_counters_on_pass() -> None:
                 logger.info(f"ACCUM: reset {key} after PASS (was {accumulator.counters[key]})")
                 accumulator.counters[key] = 0
                 accumulator.last_increment[key] = False
+                if key in accumulator.sample_frames:
+                    accumulator.sample_frames[key] = []
+                    accumulator.artifact_saved_for_streak[key] = False
 
 
 def trigger_alarm(error_type: str, count: int) -> None:

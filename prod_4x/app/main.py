@@ -52,6 +52,9 @@ def start_background_loop() -> None:
         logger.warning("QC loop will start anyway (camera might be already running)")
 
     # 2) Start loop thread.
+    # Reset cursor from previous run to avoid stale duplicate-frame filtering
+    # when camera queue/frame ids were recreated after stop/start.
+    state.last_processed_id = None
     state.stop_event.clear()
     state.thread = threading.Thread(target=qc_loop, kwargs={"settings": settings}, daemon=True)
     state.thread.start()
