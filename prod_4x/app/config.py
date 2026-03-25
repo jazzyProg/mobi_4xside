@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     API_TITLE: str = Field(default="QC API Service")
     API_VERSION: str = Field(default="2.0.0")
     LOG_LEVEL: str = Field(default="INFO")
+    DEBUG_MODE: bool = Field(default=False)
+    DEBUG_LOG_DIR: Path = Field(default=Path("/app/logs/debug"))
 
     # ===== Timeouts =====
     API_TIMEOUT: float = Field(default=30.0, ge=0.1, le=300.0)
@@ -63,6 +65,7 @@ class Settings(BaseSettings):
     CAMERA_SHM_NAME: str = Field(default="/qc_camera_ringbuffer")
     SHM_SLOT_SIZE: int = Field(default=20 * 1024 * 1024, ge=1024)  # bytes
     SHM_NUM_SLOTS: int = Field(default=16, ge=1, le=1024)
+    BRAK_BASE_DIR: Path = Field(default=Path("/mnt/hdd/brak"))
 
     model_config = SettingsConfigDict(
         env_file=".env",
