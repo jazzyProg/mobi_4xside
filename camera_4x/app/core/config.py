@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # SHM
     shm_name: str = Field(default="/qc_camera_ringbuffer")
-    shm_slot_size: int = Field(default=20 * 1024 * 1024, ge=1024)  # 10MB
+    shm_slot_size: int = Field(default=20 * 1024 * 1024, ge=1024)  # 20MB
     shm_slot_count: int = Field(default=16, ge=2, le=1024)
     shm_create_mode: bool = Field(default=True)
 
