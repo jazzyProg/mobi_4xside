@@ -214,6 +214,15 @@ class CameraManager:
             if self.current_session:
                 self.current_session.frames_count += 1
 
+        except ValueError as e:
+            if "Frame too large" in str(e):
+                logger.error(
+                    "Frame %s exceeds SHM slot size (%s bytes). "
+                    "Increase SHM_SLOT_SIZE (camera-api + qc-service) or reduce frame payload.",
+                    frame.metadata.frame_id,
+                    settings.shm_slot_size,
+                )
+            logger.error(f"Error processing frame {frame.metadata.frame_id}: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"Error processing frame {frame.metadata.frame_id}: {e}", exc_info=True)
 
